@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Outlink Collector</title>
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <main class="app">
+      <header class="header">
+        <h1>外链自动化面板</h1>
+        <button id="resetBtn" class="ghost">重置演示数据</button>
+      </header>
+
+      <nav class="tabs">
+        <button class="tab active" data-tab="collect">收集 <span id="badge-collection" class="badge">0</span></button>
+        <button class="tab" data-tab="publish">发布 <span id="badge-publish" class="badge">0</span></button>
+        <button class="tab" data-tab="logs">日志 <span id="badge-logs" class="badge">0</span></button>
+        <button class="tab" data-tab="resources">资源库 <span id="badge-resources" class="badge">0</span></button>
+      </nav>
+
+      <section class="panel active" id="panel-collect">
+        <div class="input-row">
+          <input id="targetDomainInput" type="text" placeholder="输入目标域名，如 example.com" />
+          <button id="startCollectBtn" class="primary">开始收集</button>
+          <button id="stopCollectBtn" class="secondary">暂停</button>
+        </div>
+
+        <div class="source-row">
+          <span>分析源：</span>
+          <a href="#" id="openSemrush">打开 Semrush</a>
+          <span>·</span>
+          <a href="#" id="openAhrefs">打开 Ahrefs</a>
+        </div>
+
+        <h2>分析外链页面</h2>
+        <div class="stats-grid">
+          <article class="card">
+            <label>已发现外链数</label>
+            <strong id="statDiscovered">0</strong>
+          </article>
+          <article class="card">
+            <label>已分析数量</label>
+            <strong id="statAnalyzed">0</strong>
+          </article>
+          <article class="card">
+            <label>博客评论资源</label>
+            <strong id="statBlogComment">0</strong>
+          </article>
+          <article class="card">
+            <label>队列中</label>
+            <strong id="statQueued">0</strong>
+          </article>
+        </div>
+
+        <div class="meta">
+          <span id="collectionStatus">状态：idle</span>
+          <span id="collectionTarget">目标域名：-</span>
+        </div>
+
+        <div class="recent-wrap">
+          <h3>最近分析记录</h3>
+          <div id="recentList" class="recent-list"></div>
+        </div>
+      </section>
+
+      <section class="panel" id="panel-publish">
+        <p>发布流程下一步接入（候选队列 -> AI 生成评论 -> 填表提交）。</p>
+      </section>
+
+      <section class="panel" id="panel-logs">
+        <p>日志数据已入库，后续可添加筛选和导出。</p>
+      </section>
+
+      <section class="panel" id="panel-resources">
+        <p>资源库已写入候选 URL，下一步增加表格和去重策略展示。</p>
+      </section>
+    </main>
+    <script type="module" src="popup.js"></script>
+  </body>
+  </html>

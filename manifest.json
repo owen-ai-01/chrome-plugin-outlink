@@ -1,0 +1,35 @@
+{
+  "manifest_version": 3,
+  "name": "Outlink Collector",
+  "description": "Collect, analyze, and publish outlink resources.",
+  "version": "0.1.0",
+  "permissions": [
+    "storage",
+    "tabs",
+    "scripting"
+  ],
+  "host_permissions": [
+    "https://*.semrush.com/*",
+    "https://*.ahrefs.com/*"
+  ],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "action": {
+    "default_title": "Outlink Collector",
+    "default_popup": "popup.html"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://*.semrush.com/*",
+        "https://*.ahrefs.com/*"
+      ],
+      "js": [
+        "content/interceptor.js"
+      ],
+      "run_at": "document_start"
+    }
+  ]
+}
