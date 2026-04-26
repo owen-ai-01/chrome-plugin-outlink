@@ -1,0 +1,168 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Outlink Collector</title>
+    <link rel="stylesheet" href="panel.css" />
+  </head>
+  <body>
+    <main class="app">
+      <header class="header">
+        <h1>外链自动化面板</h1>
+        <div>
+          <button id="exportJsonBtn" class="ghost">导出JSON</button>
+          <button id="exportXlsxBtn" class="ghost">导出XLSX</button>
+          <button id="importBtn" class="ghost">导入备份</button>
+          <button id="resetBtn" class="ghost">重置数据</button>
+          <input id="importFileInput" type="file" accept=".json,.xlsx,.csv,.tsv,application/json" hidden />
+        </div>
+      </header>
+
+      <nav class="tabs">
+        <button class="tab active" data-tab="collect">收集 <span id="badge-collection" class="badge">0</span></button>
+        <button class="tab" data-tab="fixed-publish">固定URL发布</button>
+        <button class="tab" data-tab="publish">发布 <span id="badge-publish" class="badge">0</span></button>
+        <button class="tab" data-tab="logs">日志 <span id="badge-logs" class="badge">0</span></button>
+        <button class="tab" data-tab="resources">资源库 <span id="badge-resources" class="badge">0</span></button>
+      </nav>
+
+      <section class="panel active" id="panel-collect">
+        <div class="input-row">
+          <input id="targetDomainInput" type="text" placeholder="输入目标域名，例如 example.com" />
+          <button id="startCollectBtn" class="primary">开始收集</button>
+          <button id="stopCollectBtn" class="secondary">暂停</button>
+        </div>
+
+        <div class="source-row">
+          <span>数据源</span>
+          <a href="#" id="openAhrefs">打开 Ahrefs Backlink Checker</a>
+        </div>
+
+        <div class="stats-grid">
+          <article class="card">
+            <label>已发现</label>
+            <strong id="statDiscovered">0</strong>
+          </article>
+          <article class="card">
+            <label>已分析</label>
+            <strong id="statAnalyzed">0</strong>
+          </article>
+          <article class="card">
+            <label>博客评论候选</label>
+            <strong id="statBlogComment">0</strong>
+          </article>
+          <article class="card">
+            <label>队列中</label>
+            <strong id="statQueued">0</strong>
+          </article>
+          <article class="card">
+            <label>非 SPAM</label>
+            <strong id="statNonSpam">0</strong>
+          </article>
+          <article class="card">
+            <label>免注册评论候选</label>
+            <strong id="statNoRegister">0</strong>
+          </article>
+        </div>
+
+        <div class="meta">
+          <span id="collectionStatus">状态：idle</span>
+          <span id="collectionTarget">目标域名：-</span>
+        </div>
+
+        <div class="filters">
+          <label><input id="filterNonSpam" type="checkbox" checked />仅看非 SPAM</label>
+          <label><input id="filterNoRegister" type="checkbox" />仅看免注册博客评论候选</label>
+        </div>
+
+        <div class="table-wrap">
+          <table class="resource-table">
+            <thead>
+              <tr>
+                <th>Type</th>
+                <th>URL</th>
+                <th>Domain</th>
+                <th>Discovered From</th>
+                <th>Has Captcha</th>
+                <th>Link Strategy</th>
+                <th>Link Format</th>
+                <th>Has URL Field</th>
+                <th>DR</th>
+                <th>Traffic</th>
+                <th>SPAM</th>
+                <th>博客评论</th>
+                <th>免注册候选</th>
+              </tr>
+            </thead>
+            <tbody id="resourceTbody"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="panel" id="panel-publish">
+        <p>发布流程下一步接入：候选资源 -> AI 生成评论 -> 自动/半自动填表提交。</p>
+      </section>
+
+      <section class="panel" id="panel-fixed-publish">
+        <div class="form-grid">
+          <input id="openrouterKeyInput" type="password" placeholder="OpenRouter API Key（必填）" />
+          <input id="openrouterModelInput" type="text" value="google/gemini-2.0-flash-001" placeholder="模型，例如 google/gemini-2.0-flash-001" />
+        </div>
+        <div class="source-row">
+          <label><input id="autoSubmitProducthunt" type="checkbox" /> 自动点击发布按钮（谨慎）</label>
+          <button id="savePublishConfigBtn" class="secondary">保存配置</button>
+        </div>
+        <div class="form-grid">
+          <input id="phTargetUrlInput" type="text" placeholder="要发布的 URL，例如 https://example.com" />
+          <input id="phExtraContextInput" type="text" placeholder="补充说明（可选）" />
+        </div>
+        <div class="source-row">
+          <button id="generatePhDraftBtn" class="primary">AI 生成文案</button>
+          <button id="publishToPhBtn" class="primary">打开 Product Hunt 并自动填表</button>
+        </div>
+        <div class="form-grid">
+          <input id="phNameInput" type="text" placeholder="Name" />
+          <input id="phTaglineInput" type="text" placeholder="Tagline" />
+          <textarea id="phDescInput" placeholder="Description"></textarea>
+          <textarea id="phCommentInput" placeholder="First Comment"></textarea>
+          <input id="phTopicsInput" type="text" placeholder="Topics（逗号分隔）" />
+        </div>
+      </section>
+
+      <section class="panel" id="panel-logs">
+        <p>日志已入库。下一步可做筛选、搜索和导出。</p>
+      </section>
+
+      <section class="panel" id="panel-resources">
+        <div class="filters">
+          <label><input id="resourceFilterNonSpam" type="checkbox" checked />仅看非 SPAM</label>
+          <label><input id="resourceFilterNoRegister" type="checkbox" />仅看免注册博客评论候选</label>
+        </div>
+        <div class="table-wrap">
+          <table class="resource-table">
+            <thead>
+              <tr>
+                <th>Type</th>
+                <th>URL</th>
+                <th>Domain</th>
+                <th>Discovered From</th>
+                <th>Has Captcha</th>
+                <th>Link Strategy</th>
+                <th>Link Format</th>
+                <th>Has URL Field</th>
+                <th>DR</th>
+                <th>Traffic</th>
+                <th>SPAM</th>
+                <th>博客评论</th>
+                <th>免注册候选</th>
+              </tr>
+            </thead>
+            <tbody id="resourcesTabTbody"></tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+    <script type="module" src="panel.js"></script>
+  </body>
+  </html>

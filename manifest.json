@@ -6,30 +6,55 @@
   "permissions": [
     "storage",
     "tabs",
-    "scripting"
+    "scripting",
+    "sidePanel"
   ],
   "host_permissions": [
-    "https://*.semrush.com/*",
+    "https://openrouter.ai/*",
+    "https://www.producthunt.com/*",
+    "https://ahrefs.com/*",
     "https://*.ahrefs.com/*"
   ],
   "background": {
-    "service_worker": "background.js",
+    "service_worker": "background-v2.js",
     "type": "module"
   },
   "action": {
-    "default_title": "Outlink Collector",
-    "default_popup": "popup.html"
+    "default_title": "Outlink Collector"
+  },
+  "side_panel": {
+    "default_path": "panel.html"
   },
   "content_scripts": [
     {
       "matches": [
-        "https://*.semrush.com/*",
+        "https://ahrefs.com/*",
         "https://*.ahrefs.com/*"
       ],
       "js": [
         "content/interceptor.js"
       ],
       "run_at": "document_start"
+    },
+    {
+      "matches": [
+        "https://www.producthunt.com/*"
+      ],
+      "js": [
+        "content/producthunt-publisher.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "content/page-hook.js"
+      ],
+      "matches": [
+        "https://ahrefs.com/*",
+        "https://*.ahrefs.com/*"
+      ]
     }
   ]
 }

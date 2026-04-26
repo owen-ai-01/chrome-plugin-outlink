@@ -1,103 +1,126 @@
 (function interceptBacklinkResponses() {
-  const MAX_URLS = 250;
-  const source = location.hostname.includes("semrush") ? "semrush" : "ahrefs";
-  const requestHints = ["backlink", "backlinks", "refdomain", "referring", "site-explorer", "links"];
+  const ahrefsChecker = location.hostname.includes("ahrefs.com") && location.pathname.includes("/backlink-checker");
+  if (!ahrefsChecker) return;
+  let autoPagerRunning = false;
+  let noNextCount = 0;
+  let lastFingerprint = "";
 
-  function isLikelyBacklinkRequest(url) {
-    const lower = String(url || "").toLowerCase();
-    return requestHints.some((hint) => lower.includes(hint));
+  function textToNumber(text) {
+    if (!text || typeof text !== "string") return null;
+    const m = text.replace(/,/g, "").match(/\d+(\.\d+)?/);
+    return m ? Number(m[0]) : null;
   }
 
-  function isHttpUrl(value) {
-    return typeof value === "string" && /^https?:\/\//i.test(value);
-  }
-
-  function extractUrls(input, bucket) {
-    if (bucket.length >= MAX_URLS) return;
-    if (isHttpUrl(input)) {
-      bucket.push(input);
-      return;
-    }
-    if (!input || typeof input !== "object") return;
-    if (Array.isArray(input)) {
-      for (const item of input) {
-        extractUrls(item, bucket);
-        if (bucket.length >= MAX_URLS) break;
-      }
-      return;
-    }
-    for (const key of Object.keys(input)) {
-      extractUrls(input[key], bucket);
-      if (bucket.length >= MAX_URLS) break;
-    }
-  }
-
-  function uniq(list) {
-    const seen = Object.create(null);
-    const output = [];
-    for (const item of list) {
-      if (seen[item]) continue;
-      seen[item] = true;
-      output.push(item);
-    }
-    return output;
-  }
-
-  function sendPayload(requestUrl, body) {
-    const bucket = [];
-    extractUrls(body, bucket);
-    const candidateUrls = uniq(bucket);
-    if (candidateUrls.length === 0) return;
-    chrome.runtime.sendMessage({
-      action: "NETWORK_BACKLINKS_PAYLOAD",
-      payload: {
-        source,
-        requestUrl,
-        candidateUrls
-      }
-    });
-  }
-
-  const nativeFetch = window.fetch;
-  window.fetch = async function patchedFetch(...args) {
-    const response = await nativeFetch.apply(this, args);
+  function sendPayload(payload) {
     try {
-      const requestUrl = typeof args[0] === "string" ? args[0] : args[0]?.url || "";
-      const contentType = response.headers.get("content-type") || "";
-      if (isLikelyBacklinkRequest(requestUrl) && contentType.includes("application/json")) {
-        const clone = response.clone();
-        clone
-          .json()
-          .then((json) => sendPayload(requestUrl, json))
-          .catch(() => {});
-      }
-    } catch {
-      // Ignore extraction errors to avoid page-side breakage.
+      chrome.runtime.sendMessage(
+        {
+          action: "NETWORK_BACKLINKS_PAYLOAD",
+          payload
+        },
+        () => {
+          if (chrome.runtime.lastError) {
+            console.error("[outlink] sendMessage failed:", chrome.runtime.lastError.message, payload);
+          }
+        }
+      );
+    } catch (error) {
+      console.error("[outlink] sendMessage exception:", error, payload);
     }
-    return response;
-  };
+  }
 
-  const nativeOpen = XMLHttpRequest.prototype.open;
-  const nativeSend = XMLHttpRequest.prototype.send;
+  function injectPageHook() {
+    const marker = "__outlink_hook_injected_v1";
+    if (document.documentElement.hasAttribute(marker)) return;
+    document.documentElement.setAttribute(marker, "1");
+    const script = document.createElement("script");
+    script.src = chrome.runtime.getURL("content/page-hook.js");
+    script.async = false;
+    script.onload = () => script.remove();
+    (document.head || document.documentElement).appendChild(script);
+  }
 
-  XMLHttpRequest.prototype.open = function patchedOpen(method, url, ...rest) {
-    this.__outlink_url = url;
-    return nativeOpen.call(this, method, url, ...rest);
-  };
+  function parseAhrefsTableRows() {
+    const rows = Array.from(document.querySelectorAll("table tbody tr"));
+    if (rows.length === 0) return [];
+    const items = [];
+    for (const row of rows) {
+      const links = Array.from(row.querySelectorAll("a[href^='http']"));
+      const href = links.map((a) => a.href).find((x) => !x.includes("ahrefs.com"));
+      if (!href) continue;
+      const rowText = row.textContent || "";
+      const cells = Array.from(row.querySelectorAll("td")).map((td) => (td.textContent || "").trim());
+      const dr = cells.map(textToNumber).find((n) => typeof n === "number" && n >= 0 && n <= 100) ?? null;
+      const traffic = cells.map(textToNumber).find((n) => typeof n === "number" && n > 100) ?? null;
+      const anchorCandidate = links.map((a) => (a.textContent || "").trim()).find((t) => t && t.length > 1) || "";
+      items.push({
+        url: href,
+        sourcePage: location.href,
+        anchor: anchorCandidate,
+        dr,
+        traffic,
+        raw: rowText.slice(0, 500)
+      });
+    }
+    return items;
+  }
 
-  XMLHttpRequest.prototype.send = function patchedSend(...args) {
-    this.addEventListener("load", function onLoad() {
-      try {
-        const requestUrl = this.__outlink_url || this.responseURL || "";
-        const type = this.getResponseHeader("content-type") || "";
-        if (!isLikelyBacklinkRequest(requestUrl) || !type.includes("application/json")) return;
-        if (typeof this.responseText !== "string" || this.responseText.length === 0) return;
-        const parsed = JSON.parse(this.responseText);
-        sendPayload(requestUrl, parsed);
-      } catch {
-        // Ignore extraction errors to avoid page-side breakage.
+  function findNextButton() {
+    const buttons = Array.from(document.querySelectorAll("button,[role='button'],a"));
+    for (const button of buttons) {
+      const text = (button.textContent || "").trim().toLowerCase();
+      const aria = (button.getAttribute("aria-label") || "").toLowerCase();
+      if (text === "next" || text === ">" || text.includes("next page") || aria.includes("next")) {
+        const disabled =
+          button.hasAttribute("disabled") ||
+          button.getAttribute("aria-disabled") === "true" ||
+          button.classList.contains("disabled");
+        if (!disabled) return button;
       }
-    });
-    return nativeSend.apply(this, args);
-  };
+    }
+    return null;
+  }
+
+  async function runAhrefsAutoPager() {
+    if (!ahrefsChecker || autoPagerRunning) return;
+    autoPagerRunning = true;
+
+    while (noNextCount < 3) {
+      const rows = parseAhrefsTableRows();
+      const fingerprint = `${location.href}|${rows.length}|${rows[0]?.url || ""}`;
+
+      if (rows.length > 0 && fingerprint !== lastFingerprint) {
+        lastFingerprint = fingerprint;
+        sendPayload({
+          source: "ahrefs-dom",
+          requestUrl: location.href,
+          candidateItems: rows
+        });
+      }
+
+      const next = findNextButton();
+      if (!next) {
+        noNextCount += 1;
+        await new Promise((resolve) => setTimeout(resolve, 2200));
+        continue;
+      }
+
+      noNextCount = 0;
+      next.click();
+      await new Promise((resolve) => setTimeout(resolve, 2600));
+    }
+  }
+
+  window.addEventListener("message", (event) => {
+    if (event.source !== window) return;
+    const data = event.data;
+    if (!data || data.__outlinkHook !== true || !data.payload) return;
+    sendPayload(data.payload);
+  });
+
+  injectPageHook();
+
+  if (ahrefsChecker) {
+    setTimeout(runAhrefsAutoPager, 2500);
+  }
 })();
