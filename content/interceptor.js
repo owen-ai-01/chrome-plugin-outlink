@@ -1,6 +1,7 @@
 (function interceptBacklinkResponses() {
   const ahrefsChecker = location.hostname.includes("ahrefs.com") && location.pathname.includes("/backlink-checker");
-  if (!ahrefsChecker) return;
+  const semrushBacklinks = location.hostname === "sem.3ue.co" && location.pathname.includes("/analytics/backlinks/backlinks");
+  if (!ahrefsChecker && !semrushBacklinks) return;
   let autoPagerRunning = false;
   let noNextCount = 0;
   let lastFingerprint = "";
@@ -65,6 +66,36 @@
     return items;
   }
 
+  function parseSemrushTableRows() {
+    const rows = Array.from(document.querySelectorAll("table tbody tr"));
+    if (rows.length === 0) return [];
+    const items = [];
+    for (const row of rows) {
+      const links = Array.from(row.querySelectorAll("a[href]"));
+      const href = links
+        .map((a) => a.href)
+        .find((x) => /^https?:\/\//i.test(x) && !x.includes("sem.3ue.co") && !x.includes("semrush.com"));
+      if (!href) continue;
+
+      const rowText = row.textContent || "";
+      const cells = Array.from(row.querySelectorAll("td")).map((td) => (td.textContent || "").trim());
+      const numbers = cells.map(textToNumber).filter((n) => typeof n === "number");
+      const da = numbers.find((n) => n >= 0 && n <= 100) ?? null;
+      const traffic = numbers.find((n) => n > 100) ?? null;
+      const anchorCandidate = links.map((a) => (a.textContent || "").trim()).find((t) => t && t.length > 1) || "";
+      items.push({
+        url: href,
+        sourcePage: location.href,
+        anchor: anchorCandidate,
+        da,
+        dr: da,
+        traffic,
+        raw: rowText.slice(0, 700)
+      });
+    }
+    return items;
+  }
+
   function findNextButton() {
     const buttons = Array.from(document.querySelectorAll("button,[role='button'],a"));
     for (const button of buttons) {
@@ -111,6 +142,36 @@
     }
   }
 
+  async function runSemrushAutoPager() {
+    if (!semrushBacklinks || autoPagerRunning) return;
+    autoPagerRunning = true;
+
+    while (noNextCount < 3) {
+      const rows = parseSemrushTableRows();
+      const fingerprint = `${location.href}|${rows.length}|${rows[0]?.url || ""}`;
+
+      if (rows.length > 0 && fingerprint !== lastFingerprint) {
+        lastFingerprint = fingerprint;
+        sendPayload({
+          source: "semrush-dom",
+          requestUrl: location.href,
+          candidateItems: rows
+        });
+      }
+
+      const next = findNextButton();
+      if (!next) {
+        noNextCount += 1;
+        await new Promise((resolve) => setTimeout(resolve, 2200));
+        continue;
+      }
+
+      noNextCount = 0;
+      next.click();
+      await new Promise((resolve) => setTimeout(resolve, 2600));
+    }
+  }
+
   window.addEventListener("message", (event) => {
     if (event.source !== window) return;
     const data = event.data;
@@ -122,5 +183,8 @@
 
   if (ahrefsChecker) {
     setTimeout(runAhrefsAutoPager, 2500);
+  }
+  if (semrushBacklinks) {
+    setTimeout(runSemrushAutoPager, 2500);
   }
 })();

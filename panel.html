@@ -21,6 +21,8 @@
 
       <nav class="tabs">
         <button class="tab active" data-tab="collect">收集 <span id="badge-collection" class="badge">0</span></button>
+        <button class="tab" data-tab="blog-auto">自动博客外链</button>
+        <button class="tab" data-tab="semrush-auto">Semrush自动外链</button>
         <button class="tab" data-tab="fixed-publish">固定URL发布</button>
         <button class="tab" data-tab="publish">发布 <span id="badge-publish" class="badge">0</span></button>
         <button class="tab" data-tab="logs">日志 <span id="badge-logs" class="badge">0</span></button>
@@ -101,7 +103,70 @@
       </section>
 
       <section class="panel" id="panel-publish">
-        <p>发布流程下一步接入：候选资源 -> AI 生成评论 -> 自动/半自动填表提交。</p>
+        <div class="source-row">
+          <button id="refreshPublishRecordsBtn" class="secondary">刷新发布记录</button>
+          <button id="checkPublishLinksBtn" class="secondary">检查链接存活</button>
+        </div>
+        <div class="table-wrap compact">
+          <table class="resource-table">
+            <thead>
+              <tr>
+                <th>时间</th>
+                <th>URL</th>
+                <th>状态</th>
+                <th>系统</th>
+                <th>存活</th>
+                <th>截图</th>
+              </tr>
+            </thead>
+            <tbody id="publishRecordsTbody"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="panel" id="panel-blog-auto">
+        <div class="form-grid">
+          <input id="blogTargetUrlInput" type="text" placeholder="要做外链的 URL，例如 https://example.com" />
+          <input id="blogAuthorNameInput" type="text" placeholder="评论作者名" />
+          <input id="blogAuthorEmailInput" type="email" placeholder="评论邮箱（部分博客必填）" />
+          <input id="blogExtraContextInput" type="text" placeholder="评论补充说明（可选）" />
+          <textarea id="blogCommentInput" placeholder="博客评论内容"></textarea>
+        </div>
+        <div class="source-row">
+          <label><input id="autoSubmitBlogComment" type="checkbox" /> 自动点击评论提交按钮（谨慎）</label>
+          <button id="saveBlogConfigBtn" class="secondary">保存配置</button>
+          <button id="generateBlogCommentBtn" class="primary">AI 生成评论</button>
+        </div>
+        <div class="source-row">
+          <span id="currentCommentSystem">当前页评论系统：未检测</span>
+        </div>
+        <div class="source-row">
+          <button id="inspectCurrentCommentBtn" class="secondary">检测当前页</button>
+          <button id="generateCurrentCommentBtn" class="primary">按当前文章生成</button>
+          <button id="prefillCurrentCommentBtn" class="secondary">预填当前页</button>
+          <button id="submitCurrentCommentBtn" class="primary">一键提交</button>
+        </div>
+        <div class="input-row">
+          <input id="blogPageUrlInput" type="text" placeholder="手动输入博客文章/评论页 URL，或从下方候选列表选择" />
+          <button id="openBlogCommentBtn" class="primary">打开并自动写评论</button>
+          <button id="refreshBlogCandidatesBtn" class="secondary">刷新候选</button>
+        </div>
+        <div class="table-wrap compact">
+          <table class="resource-table">
+            <thead>
+              <tr>
+                <th>URL</th>
+                <th>Domain</th>
+                <th>DR</th>
+                <th>Traffic</th>
+                <th>SPAM</th>
+                <th>原因</th>
+                <th>操作</th>
+              </tr>
+            </thead>
+            <tbody id="blogAutoTbody"></tbody>
+          </table>
+        </div>
       </section>
 
       <section class="panel" id="panel-fixed-publish">
@@ -127,6 +192,33 @@
           <textarea id="phDescInput" placeholder="Description"></textarea>
           <textarea id="phCommentInput" placeholder="First Comment"></textarea>
           <input id="phTopicsInput" type="text" placeholder="Topics（逗号分隔）" />
+        </div>
+      </section>
+
+      <section class="panel" id="panel-semrush-auto">
+        <div class="input-row">
+          <input id="semrushCompetitorInput" type="text" placeholder="输入竞品 URL 或域名，例如 myclaw.ai" />
+          <button id="openSemrushBacklinksBtn" class="primary">打开 Semrush 并采集</button>
+          <button id="refreshSemrushListBtn" class="secondary">刷新待发清单</button>
+        </div>
+        <div class="source-row">
+          <span id="semrushListStatus">过滤：排除付费链接、新闻媒体、社交媒体；保留博客/社区并按 DA 排序。</span>
+        </div>
+        <div class="table-wrap compact">
+          <table class="resource-table">
+            <thead>
+              <tr>
+                <th>URL</th>
+                <th>Domain</th>
+                <th>DA</th>
+                <th>Traffic</th>
+                <th>类型</th>
+                <th>过滤原因</th>
+                <th>操作</th>
+              </tr>
+            </thead>
+            <tbody id="semrushAutoTbody"></tbody>
+          </table>
         </div>
       </section>
 

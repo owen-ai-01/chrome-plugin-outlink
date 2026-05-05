@@ -9,10 +9,15 @@ const DEFAULT_DB = {
   publishConfig: {
     openrouterApiKey: "",
     openrouterModel: "google/gemini-2.0-flash-001",
-    autoSubmitProductHunt: false
+    autoSubmitProductHunt: false,
+    blogAuthorName: "",
+    blogAuthorEmail: "",
+    blogWebsiteUrl: "",
+    autoSubmitBlogComment: false
   },
   publishState: {
-    productHuntPending: null
+    productHuntPending: null,
+    blogCommentPending: null
   },
   collectionState: {
     targetDomain: "",
@@ -34,7 +39,8 @@ const DEFAULT_DB = {
 };
 
 const SOURCE_URLS = {
-  ahrefs: (domain) => `https://ahrefs.com/backlink-checker/?input=${encodeURIComponent(domain)}&mode=subdomains`
+  ahrefs: (domain) => `https://ahrefs.com/backlink-checker/?input=${encodeURIComponent(domain)}&mode=subdomains`,
+  semrush: (domain) => `https://sem.3ue.co/analytics/backlinks/backlinks/?q=${encodeURIComponent(domain)}&searchType=domain&ba_mt=active`
 };
 
 const SPAM_KEYWORDS = [
@@ -57,6 +63,21 @@ const SPAM_KEYWORDS = [
 const SUSPICIOUS_TLDS = [".xyz", ".top", ".click", ".work", ".buzz", ".rest", ".gq", ".cf", ".tk", ".ml"];
 const BLOG_COMMENT_MARKERS = ["comment", "replytocom", "leave-a-reply", "wp-comments", "disqus", "blog", "post", "article"];
 const REQUIRE_LOGIN_MARKERS = ["wp-login", "signin", "sign-in", "signup", "sign-up", "register", "account/login"];
+const SOCIAL_DOMAINS = [
+  "facebook.com",
+  "twitter.com",
+  "x.com",
+  "linkedin.com",
+  "instagram.com",
+  "youtube.com",
+  "tiktok.com",
+  "pinterest.com",
+  "reddit.com",
+  "threads.net"
+];
+const NEWS_MARKERS = ["news", "press", "media", "magazine", "journal", "daily", "times", "tribune", "herald", "bloomberg", "reuters"];
+const PAID_LINK_MARKERS = ["sponsored", "advertise", "advertising", "paid", "pricing", "partnership", "promo", "affiliate"];
+const COMMUNITY_MARKERS = ["forum", "community", "discussion", "topic", "thread", "question", "answers", "stackexchange", "quora"];
 
 function setupSidePanel() {
   if (!chrome.sidePanel?.setPanelBehavior) return;
@@ -153,6 +174,67 @@ function isLikelyBlogCommentResource(url) {
   }
 }
 
+function hostnameMatchesAny(domain, domains) {
+  return domains.some((item) => domain === item || domain.endsWith(`.${item}`));
+}
+
+function classifySemrushPublishable(row) {
+  const url = String(row?.url || "");
+  let domain = String(row?.domain || "");
+  try {
+    domain = domain || new URL(url).hostname.replace(/^www\./, "");
+  } catch {
+    return {
+      semrushPublishable: false,
+      publishableType: "unknown",
+      publishableReason: "URL 无效"
+    };
+  }
+  const text = `${url} ${domain} ${row?.anchor || ""} ${row?.raw || ""}`.toLowerCase();
+
+  if (hostnameMatchesAny(domain, SOCIAL_DOMAINS)) {
+    return {
+      semrushPublishable: false,
+      publishableType: "social",
+      publishableReason: "已过滤：社交媒体"
+    };
+  }
+  if (PAID_LINK_MARKERS.some((marker) => text.includes(marker))) {
+    return {
+      semrushPublishable: false,
+      publishableType: "paid",
+      publishableReason: "已过滤：疑似付费/赞助链接"
+    };
+  }
+  if (NEWS_MARKERS.some((marker) => text.includes(marker))) {
+    return {
+      semrushPublishable: false,
+      publishableType: "news_media",
+      publishableReason: "已过滤：新闻媒体，通常不能发评论"
+    };
+  }
+  if (isLikelyBlogCommentResource(url)) {
+    return {
+      semrushPublishable: true,
+      publishableType: "blog",
+      publishableReason: "博客/文章/评论页候选"
+    };
+  }
+  if (COMMUNITY_MARKERS.some((marker) => text.includes(marker))) {
+    return {
+      semrushPublishable: true,
+      publishableType: "community",
+      publishableReason: "社区/讨论页候选"
+    };
+  }
+
+  return {
+    semrushPublishable: false,
+    publishableType: "generic",
+    publishableReason: "已过滤：不是博客或社区类型"
+  };
+}
+
 function parseNumber(input) {
   if (typeof input === "number") return Number.isFinite(input) ? input : null;
   if (typeof input !== "string") return null;
@@ -230,6 +312,7 @@ function buildImportedResource(input) {
   const discoveredFrom = input.discoveredFrom || input["Discovered From"] || "";
   const targetDomain = normalizeDomain(input.targetDomain || parseDomainFromDiscoveredFrom(discoveredFrom));
   const dr = parseNumber(input.dr ?? input.DR);
+  const da = parseNumber(input.da ?? input.DA ?? input.authorityScore ?? input["Authority Score"]);
   const traffic = parseNumber(input.traffic ?? input.Traffic);
   const spamScore = parseNumber(input.spamScore ?? input.SPAM) ?? 0;
   const isBlogCommentCandidate = parseBoolish(input.isBlogCommentCandidate ?? input["博客评论"], false);
@@ -252,6 +335,7 @@ function buildImportedResource(input) {
     sourcePage: input.sourcePage || "",
     anchor: input.anchor || "",
     dr,
+    da,
     traffic,
     spamScore,
     isNonSpam,
@@ -642,6 +726,384 @@ async function trySendProductHuntAutofill(tabId) {
   }
 }
 
+function normalizeBlogCommentDraft(input) {
+  return {
+    comment: safeText(input?.comment).slice(0, 800)
+  };
+}
+
+async function generateBlogCommentDraft(payload) {
+  const db = await getDB();
+  const config = db.publishConfig || DEFAULT_DB.publishConfig;
+  const apiKey = safeText(config.openrouterApiKey);
+  if (!apiKey) throw new Error("请先配置 OpenRouter API Key");
+
+  const targetUrl = normalizeUrl(payload?.targetUrl || config.blogWebsiteUrl || "");
+  if (!targetUrl) throw new Error("要做外链的 URL 格式不正确");
+  const blogPageUrl = normalizeUrl(payload?.blogPageUrl || "");
+  const context = safeText(payload?.extraContext || "");
+  const articleTitle = safeText(payload?.articleTitle || "");
+  const articleText = safeText(payload?.articleText || "").slice(0, 4500);
+  const commentSystem = safeText(payload?.commentSystem || "");
+
+  const prompt = [
+    "你是博客评论助手，目标是写一条自然、具体、不过度营销的评论。",
+    `要引用的网站 URL: ${targetUrl}`,
+    blogPageUrl ? `评论页面 URL: ${blogPageUrl}` : "",
+    commentSystem ? `评论系统: ${commentSystem}` : "",
+    articleTitle ? `文章标题: ${articleTitle}` : "",
+    articleText ? `文章内容摘要: ${articleText}` : "",
+    context ? `补充信息: ${context}` : "",
+    "请只返回 JSON 对象，字段必须包含：comment。",
+    "要求：comment 60-180 字；必须针对文章观点或细节回应；语气真实；不要堆关键词；不要承诺虚假体验；可以自然提到上面的 URL。",
+    "不要包含 markdown，不要包含解释。"
+  ]
+    .filter(Boolean)
+    .join("\n");
+
+  const model = safeText(config.openrouterModel) || "google/gemini-2.0-flash-001";
+  const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      "Content-Type": "application/json",
+      "HTTP-Referer": "https://localhost/chrome-plugin-outlink",
+      "X-Title": "Outlink Publisher"
+    },
+    body: JSON.stringify({
+      model,
+      messages: [{ role: "user", content: prompt }],
+      temperature: 0.45
+    })
+  });
+
+  if (!response.ok) {
+    const errText = await response.text().catch(() => "");
+    throw new Error(`OpenRouter 请求失败 (${response.status}) ${errText.slice(0, 200)}`);
+  }
+
+  const data = await response.json();
+  const content = data?.choices?.[0]?.message?.content || "";
+  const draft = normalizeBlogCommentDraft(parseJsonFromModelText(content));
+  if (!draft.comment) throw new Error("模型返回数据不完整，请补充上下文后重试");
+
+  await appendLog(db, `生成博客评论：${targetUrl}`);
+  await setDB(db);
+  return draft;
+}
+
+async function getActiveTab() {
+  const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+  const tab = tabs?.[0];
+  if (!tab?.id) throw new Error("未找到当前活动页面");
+  return tab;
+}
+
+async function sendMessageToFrame(tabId, frameId, message) {
+  return new Promise((resolve) => {
+    chrome.tabs.sendMessage(tabId, message, { frameId }, (response) => {
+      if (chrome.runtime.lastError) {
+        resolve({ __sendError: chrome.runtime.lastError.message, frameId });
+        return;
+      }
+      resolve({ ...(response || {}), frameId });
+    });
+  });
+}
+
+async function sendBlogMessageToAllFrames(tabId, message) {
+  let frames = [];
+  try {
+    frames = await chrome.webNavigation.getAllFrames({ tabId });
+  } catch {
+    frames = [{ frameId: 0 }];
+  }
+  const frameIds = [...new Set((frames || []).map((frame) => frame.frameId).filter((id) => typeof id === "number"))];
+  const results = [];
+  for (const frameId of frameIds.length ? frameIds : [0]) {
+    results.push(await sendMessageToFrame(tabId, frameId, message));
+  }
+  return results.filter((item) => !item.__sendError);
+}
+
+function pickBestBlogFrameResponse(results) {
+  return (
+    results.find((item) => item.ok && item.system && item.system !== "unknown") ||
+    results.find((item) => item.system && item.system !== "unknown") ||
+    results.find((item) => item.ok) ||
+    results[0] ||
+    null
+  );
+}
+
+async function captureTabScreenshot(tabId) {
+  try {
+    const tab = await chrome.tabs.get(tabId);
+    return await chrome.tabs.captureVisibleTab(tab.windowId, { format: "jpeg", quality: 50 });
+  } catch {
+    return "";
+  }
+}
+
+async function recordBlogPublishEvent({ tabId, targetUrl, status, comment, system, submitTried, filledCount, error }) {
+  const db = await getDB();
+  const tab = await chrome.tabs.get(tabId).catch(() => null);
+  const screenshotDataUrl = await captureTabScreenshot(tabId);
+  db.tables.publish.unshift({
+    id: crypto.randomUUID(),
+    platform: "blog_comment",
+    targetUrl: targetUrl || db.publishConfig?.blogWebsiteUrl || "",
+    blogPageUrl: tab?.url || "",
+    status,
+    comment: safeText(comment || "").slice(0, 800),
+    commentSystem: system || "",
+    submitTried: Boolean(submitTried),
+    filledCount: filledCount ?? null,
+    screenshotDataUrl,
+    error: error || "",
+    createdAt: new Date().toISOString()
+  });
+  db.tables.publish = db.tables.publish.slice(0, 30);
+  await appendLog(db, `博客评论发布记录：${status} ${tab?.url || ""}`, error ? "error" : "info");
+  await setDB(db);
+}
+
+function getHostnameFromUrl(value) {
+  try {
+    return new URL(value).hostname.replace(/^www\./, "");
+  } catch {
+    return "";
+  }
+}
+
+async function checkPublishLinks() {
+  const db = await getDB();
+  const rows = (db.tables.publish || []).filter((row) => row.platform === "blog_comment" && row.blogPageUrl && row.targetUrl);
+  let checked = 0;
+  for (const row of rows.slice(0, 30)) {
+    checked += 1;
+    try {
+      const response = await fetch(row.blogPageUrl, { method: "GET", credentials: "omit" });
+      const html = await response.text();
+      const targetHost = getHostnameFromUrl(row.targetUrl);
+      const found = html.includes(row.targetUrl) || (targetHost && html.includes(targetHost));
+      row.linkStatus = found ? "live" : "not_found";
+      row.checkedAt = new Date().toISOString();
+      row.updatedAt = row.checkedAt;
+    } catch (error) {
+      row.linkStatus = "check_failed";
+      row.checkedAt = new Date().toISOString();
+      row.error = error?.message || String(error);
+    }
+  }
+  await appendLog(db, `链接存活检查完成：${checked} 条`);
+  await setDB(db);
+  return { checked };
+}
+
+async function inspectCurrentCommentPage() {
+  const tab = await getActiveTab();
+  const results = await sendBlogMessageToAllFrames(tab.id, { action: "BLOG_COMMENT_INSPECT" });
+  const best = pickBestBlogFrameResponse(results);
+  if (!best) throw new Error("当前页面未加载评论助手脚本，请刷新页面后重试");
+  return {
+    ...best,
+    pageUrl: tab.url || best.url || "",
+    tabId: tab.id
+  };
+}
+
+async function generateCurrentPageBlogComment(payload) {
+  const inspection = await inspectCurrentCommentPage();
+  const article = inspection.article || {};
+  const draft = await generateBlogCommentDraft({
+    targetUrl: payload?.targetUrl || "",
+    blogPageUrl: inspection.pageUrl || inspection.url || "",
+    extraContext: payload?.extraContext || "",
+    articleTitle: article.title || "",
+    articleText: [article.metaDescription, article.text].filter(Boolean).join("\n"),
+    commentSystem: inspection.system || ""
+  });
+  return { draft, inspection };
+}
+
+async function prefillCurrentPageBlogComment(payload) {
+  const tab = await getActiveTab();
+  const results = await sendBlogMessageToAllFrames(tab.id, {
+    action: "BLOG_COMMENT_AUTOFILL",
+    payload: {
+      targetUrl: normalizeUrl(payload?.targetUrl || ""),
+      authorName: safeText(payload?.authorName || ""),
+      authorEmail: safeText(payload?.authorEmail || ""),
+      comment: safeText(payload?.comment || ""),
+      autoSubmit: false
+    }
+  });
+  const best = pickBestBlogFrameResponse(results);
+  if (!best?.ok) throw new Error(best?.error || "当前页面未找到可预填的评论表单");
+  await recordBlogPublishEvent({
+    tabId: tab.id,
+    targetUrl: payload?.targetUrl || "",
+    status: "filled_review",
+    comment: payload?.comment || "",
+    system: best.system,
+    filledCount: best.filledCount
+  });
+  return best;
+}
+
+async function submitCurrentPageBlogComment(payload) {
+  const tab = await getActiveTab();
+  const results = await sendBlogMessageToAllFrames(tab.id, { action: "BLOG_COMMENT_SUBMIT" });
+  const best = pickBestBlogFrameResponse(results);
+  if (!best?.ok) {
+    await recordBlogPublishEvent({
+      tabId: tab.id,
+      targetUrl: payload?.targetUrl || "",
+      status: "submit_failed",
+      comment: payload?.comment || "",
+      system: best?.system || "",
+      error: best?.error || "提交失败"
+    });
+    throw new Error(best?.error || "提交失败");
+  }
+  await recordBlogPublishEvent({
+    tabId: tab.id,
+    targetUrl: payload?.targetUrl || "",
+    status: "submitted_try",
+    comment: payload?.comment || "",
+    system: best.system,
+    submitTried: true
+  });
+  return best;
+}
+
+async function openAndFillBlogComment(payload) {
+  const db = await getDB();
+  const blogPageUrl = normalizeUrl(payload?.blogPageUrl || "");
+  const targetUrl = normalizeUrl(payload?.targetUrl || db.publishConfig?.blogWebsiteUrl || "");
+  if (!blogPageUrl) throw new Error("博客评论页 URL 格式不正确");
+  if (!targetUrl) throw new Error("要做外链的 URL 格式不正确");
+
+  let comment = safeText(payload?.comment || "");
+  if (!comment) {
+    const draft = await generateBlogCommentDraft({
+      targetUrl,
+      blogPageUrl,
+      extraContext: payload?.extraContext || ""
+    });
+    comment = draft.comment;
+  }
+
+  const autoSubmit = Boolean(payload?.autoSubmit ?? db.publishConfig?.autoSubmitBlogComment);
+  const tab = await chrome.tabs.create({ url: blogPageUrl, active: true });
+  db.publishState.blogCommentPending = {
+    tabId: tab.id,
+    attempts: 0,
+    payload: {
+      targetUrl,
+      authorName: safeText(payload?.authorName || db.publishConfig?.blogAuthorName || ""),
+      authorEmail: safeText(payload?.authorEmail || db.publishConfig?.blogAuthorEmail || ""),
+      comment,
+      autoSubmit
+    },
+    createdAt: new Date().toISOString()
+  };
+  db.publishConfig = {
+    ...DEFAULT_DB.publishConfig,
+    ...(db.publishConfig || {}),
+    blogAuthorName: safeText(payload?.authorName || db.publishConfig?.blogAuthorName || ""),
+    blogAuthorEmail: safeText(payload?.authorEmail || db.publishConfig?.blogAuthorEmail || ""),
+    blogWebsiteUrl: targetUrl,
+    autoSubmitBlogComment: autoSubmit
+  };
+  db.tables.publish.unshift({
+    id: crypto.randomUUID(),
+    platform: "blog_comment",
+    targetUrl,
+    blogPageUrl,
+    status: "opening",
+    createdAt: new Date().toISOString()
+  });
+  db.tables.publish = db.tables.publish.slice(0, 1000);
+  await appendLog(db, `打开博客评论页：${blogPageUrl}`);
+  await setDB(db);
+  setTimeout(() => {
+    trySendBlogCommentAutofill(tab.id).catch(() => {});
+  }, 1200);
+  return { tabId: tab.id, comment };
+}
+
+async function trySendBlogCommentAutofill(tabId) {
+  const perTickRetries = 8;
+  for (let tick = 1; tick <= perTickRetries; tick += 1) {
+    const db = await getDB();
+    const pending = db.publishState?.blogCommentPending;
+    if (!pending || pending.tabId !== tabId) return;
+    if ((pending.attempts || 0) > 20) {
+      await appendLog(db, "博客评论自动填写停止：超过最大重试次数", "error");
+      db.publishState.blogCommentPending = null;
+      await setDB(db);
+      return;
+    }
+
+    const responses = await sendBlogMessageToAllFrames(tabId, {
+      action: "BLOG_COMMENT_AUTOFILL",
+      payload: pending.payload
+    });
+    const resp = pickBestBlogFrameResponse(responses) || { __sendError: "no response" };
+
+    if (resp?.__sendError) {
+      await new Promise((r) => setTimeout(r, 500));
+      continue;
+    }
+
+    const latest = await getDB();
+    const latestPending = latest.publishState?.blogCommentPending;
+    if (!latestPending || latestPending.tabId !== tabId) return;
+    latestPending.attempts = (latestPending.attempts || 0) + 1;
+    const row = latest.tables.publish.find(
+      (item) => item.platform === "blog_comment" && item.targetUrl === latestPending.payload.targetUrl
+    );
+    if (row) row.updatedAt = new Date().toISOString();
+
+    if (resp?.ok || resp?.submitTried) {
+      await appendLog(
+        latest,
+        `博客评论自动填写：filled=${resp?.filledCount ?? 0}, submit=${resp?.submitTried ? "yes" : "no"}`,
+        "info"
+      );
+      if (row) row.status = resp?.submitTried ? "submitted_try" : "filled";
+      latest.publishState.blogCommentPending = null;
+      await setDB(latest);
+      await recordBlogPublishEvent({
+        tabId,
+        targetUrl: latestPending.payload.targetUrl,
+        status: resp?.submitTried ? "submitted_try" : "filled_review",
+        comment: latestPending.payload.comment,
+        system: resp?.system,
+        submitTried: resp?.submitTried,
+        filledCount: resp?.filledCount
+      });
+      return;
+    }
+
+    await appendLog(latest, `博客评论自动填写失败: ${resp?.error || "unknown"}`, "error");
+    if (row) row.status = "fill_failed";
+    latest.publishState.blogCommentPending = null;
+    await setDB(latest);
+    await recordBlogPublishEvent({
+      tabId,
+      targetUrl: latestPending.payload.targetUrl,
+      status: "fill_failed",
+      comment: latestPending.payload.comment,
+      system: resp?.system,
+      error: resp?.error || "unknown"
+    });
+    return;
+  }
+}
+
 async function startCollection(targetDomain) {
   const db = await getDB();
   db.tables.resources = dedupeResourcesKeepLatest(db.tables.resources);
@@ -682,6 +1144,46 @@ async function startCollection(targetDomain) {
   await chrome.tabs.create({ url: SOURCE_URLS.ahrefs(domain), active: true });
 }
 
+async function startSemrushCollection(competitorDomain) {
+  const db = await getDB();
+  db.tables.resources = dedupeResourcesKeepLatest(db.tables.resources);
+  const domain = normalizeDomain(competitorDomain);
+  if (!domain) throw new Error("竞品 URL 或域名格式不正确");
+  const batchId = crypto.randomUUID();
+
+  db.collectionState = {
+    targetDomain: domain,
+    source: "semrush-backlinks",
+    status: "collecting",
+    batchId,
+    startedAt: new Date().toISOString(),
+    counts: {
+      discovered: 0,
+      analyzed: 0,
+      blogCommentResources: 0,
+      queued: 0,
+      nonSpam: 0,
+      noRegisterBlogComment: 0
+    },
+    queue: [],
+    seenByUrl: {},
+    recent: []
+  };
+
+  db.tables.collection.unshift({
+    id: crypto.randomUUID(),
+    batchId,
+    targetDomain: domain,
+    source: "semrush-backlinks",
+    startedAt: db.collectionState.startedAt,
+    status: "collecting"
+  });
+  db.tables.collection = db.tables.collection.slice(0, 300);
+  await appendLog(db, `开始 Semrush 竞品外链采集：${domain}`);
+  await setDB(db);
+  await chrome.tabs.create({ url: SOURCE_URLS.semrush(domain), active: true });
+}
+
 function normalizeIncomingItem(raw, source, targetDomain) {
   const directUrl = typeof raw === "string" ? raw : raw?.url || raw?.referringPage || raw?.sourceUrl || raw?.link;
   const url = normalizeUrl(directUrl);
@@ -695,9 +1197,13 @@ function normalizeIncomingItem(raw, source, targetDomain) {
 
   if (!domain || domain === targetDomain) return null;
   if (domain.endsWith("ahrefs.com")) return null;
+  if (domain.endsWith("semrush.com") || domain.endsWith("sem.3ue.co")) return null;
 
   const drRaw = raw?.dr ?? raw?.domainRating ?? raw?.domain_rank;
+  const daRaw = raw?.da ?? raw?.domainAuthority ?? raw?.authorityScore ?? raw?.authority_score;
   const trafficRaw = raw?.traffic ?? raw?.organicTraffic ?? raw?.organic_traffic;
+  const da = parseNumber(daRaw);
+  const dr = parseNumber(drRaw) ?? da;
 
   return {
     url,
@@ -705,7 +1211,8 @@ function normalizeIncomingItem(raw, source, targetDomain) {
     source,
     sourcePage: raw?.sourcePage || raw?.source || "",
     anchor: raw?.anchor || raw?.anchorText || "",
-    dr: parseNumber(drRaw),
+    dr,
+    da,
     traffic: parseNumber(trafficRaw)
   };
 }
@@ -763,7 +1270,9 @@ async function upsertResourcesFromPayload(payload) {
       sourcePage: base.sourcePage,
       anchor: base.anchor,
       dr: base.dr,
+      da: base.da,
       traffic: base.traffic,
+      raw: typeof raw?.raw === "string" ? raw.raw : "",
       spamScore: spam.spamScore,
       isNonSpam: spam.isNonSpam,
       nonSpamReason: spam.nonSpamReason,
@@ -839,10 +1348,20 @@ async function getResources(options = {}) {
   const db = await getDB();
   db.tables.resources = dedupeResourcesKeepLatest(db.tables.resources);
   await setDB(db);
-  const { onlyNonSpam = false, onlyNoRegister = false, limit = 200 } = options;
+  const { onlyNonSpam = false, onlyNoRegister = false, semrushPublishableOnly = false, limit = 200 } = options;
   let rows = db.tables.resources;
   if (onlyNonSpam) rows = rows.filter((row) => row.isNonSpam);
   if (onlyNoRegister) rows = rows.filter((row) => row.noRegisterLikely && row.isBlogCommentCandidate);
+  if (semrushPublishableOnly) {
+    rows = rows
+      .filter((row) => String(row.source || "").includes("semrush"))
+      .map((row) => ({
+        ...row,
+        ...classifySemrushPublishable(row)
+      }))
+      .filter((row) => row.semrushPublishable)
+      .sort((a, b) => (b.da ?? b.dr ?? 0) - (a.da ?? a.dr ?? 0));
+  }
   return rows.slice(0, Math.min(1000, Math.max(10, limit)));
 }
 
@@ -868,8 +1387,15 @@ async function importResourcesRows(rows) {
 chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
   if (changeInfo.status !== "complete") return;
   const url = String(tab?.url || "");
-  if (!url.includes("producthunt.com/posts/new")) return;
-  await trySendProductHuntAutofill(tabId);
+  if (url.includes("producthunt.com/posts/new")) {
+    await trySendProductHuntAutofill(tabId);
+    return;
+  }
+
+  const db = await getDB();
+  if (db.publishState?.blogCommentPending?.tabId === tabId) {
+    await trySendBlogCommentAutofill(tabId);
+  }
 });
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
@@ -877,6 +1403,13 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 
   if (action === "COLLECTION_START") {
     startCollection(message.targetDomain)
+      .then(() => sendResponse({ ok: true }))
+      .catch((error) => sendResponse({ ok: false, error: error.message || String(error) }));
+    return true;
+  }
+
+  if (action === "SEMRUSH_COLLECTION_START") {
+    startSemrushCollection(message.competitorDomain)
       .then(() => sendResponse({ ok: true }))
       .catch((error) => sendResponse({ ok: false, error: error.message || String(error) }));
     return true;
@@ -921,6 +1454,20 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (action === "GET_RESOURCES") {
     getResources(message.options || {})
       .then((rows) => sendResponse({ ok: true, rows }))
+      .catch((error) => sendResponse({ ok: false, error: error.message || String(error) }));
+    return true;
+  }
+
+  if (action === "GET_PUBLISH_RECORDS") {
+    getDB()
+      .then((db) => sendResponse({ ok: true, rows: (db.tables.publish || []).slice(0, 100) }))
+      .catch((error) => sendResponse({ ok: false, error: error.message || String(error) }));
+    return true;
+  }
+
+  if (action === "CHECK_PUBLISH_LINKS") {
+    checkPublishLinks()
+      .then((result) => sendResponse({ ok: true, ...result }))
       .catch((error) => sendResponse({ ok: false, error: error.message || String(error) }));
     return true;
   }
@@ -993,8 +1540,50 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     return true;
   }
 
+  if (action === "GENERATE_BLOG_COMMENT_DRAFT") {
+    generateBlogCommentDraft(message.payload || {})
+      .then((draft) => sendResponse({ ok: true, draft }))
+      .catch((error) => sendResponse({ ok: false, error: error.message || String(error) }));
+    return true;
+  }
+
+  if (action === "INSPECT_CURRENT_COMMENT_PAGE") {
+    inspectCurrentCommentPage()
+      .then((inspection) => sendResponse({ ok: true, inspection }))
+      .catch((error) => sendResponse({ ok: false, error: error.message || String(error) }));
+    return true;
+  }
+
+  if (action === "GENERATE_CURRENT_PAGE_BLOG_COMMENT") {
+    generateCurrentPageBlogComment(message.payload || {})
+      .then((result) => sendResponse({ ok: true, ...result }))
+      .catch((error) => sendResponse({ ok: false, error: error.message || String(error) }));
+    return true;
+  }
+
+  if (action === "PREFILL_CURRENT_PAGE_BLOG_COMMENT") {
+    prefillCurrentPageBlogComment(message.payload || {})
+      .then((result) => sendResponse({ ok: true, result }))
+      .catch((error) => sendResponse({ ok: false, error: error.message || String(error) }));
+    return true;
+  }
+
+  if (action === "SUBMIT_CURRENT_PAGE_BLOG_COMMENT") {
+    submitCurrentPageBlogComment(message.payload || {})
+      .then((result) => sendResponse({ ok: true, result }))
+      .catch((error) => sendResponse({ ok: false, error: error.message || String(error) }));
+    return true;
+  }
+
   if (action === "OPEN_AND_FILL_PRODUCTHUNT") {
     openAndFillProductHunt(message.payload || {})
+      .then((result) => sendResponse({ ok: true, ...result }))
+      .catch((error) => sendResponse({ ok: false, error: error.message || String(error) }));
+    return true;
+  }
+
+  if (action === "OPEN_AND_FILL_BLOG_COMMENT") {
+    openAndFillBlogComment(message.payload || {})
       .then((result) => sendResponse({ ok: true, ...result }))
       .catch((error) => sendResponse({ ok: false, error: error.message || String(error) }));
     return true;

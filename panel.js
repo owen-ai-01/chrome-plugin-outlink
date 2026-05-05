@@ -13,6 +13,9 @@ const badgeCollection = document.getElementById("badge-collection");
 const badgePublish = document.getElementById("badge-publish");
 const badgeLogs = document.getElementById("badge-logs");
 const badgeResources = document.getElementById("badge-resources");
+const refreshPublishRecordsBtn = document.getElementById("refreshPublishRecordsBtn");
+const checkPublishLinksBtn = document.getElementById("checkPublishLinksBtn");
+const publishRecordsTbody = document.getElementById("publishRecordsTbody");
 
 const statDiscovered = document.getElementById("statDiscovered");
 const statAnalyzed = document.getElementById("statAnalyzed");
@@ -43,6 +46,28 @@ const phTaglineInput = document.getElementById("phTaglineInput");
 const phDescInput = document.getElementById("phDescInput");
 const phCommentInput = document.getElementById("phCommentInput");
 const phTopicsInput = document.getElementById("phTopicsInput");
+const blogTargetUrlInput = document.getElementById("blogTargetUrlInput");
+const blogAuthorNameInput = document.getElementById("blogAuthorNameInput");
+const blogAuthorEmailInput = document.getElementById("blogAuthorEmailInput");
+const blogExtraContextInput = document.getElementById("blogExtraContextInput");
+const blogCommentInput = document.getElementById("blogCommentInput");
+const autoSubmitBlogComment = document.getElementById("autoSubmitBlogComment");
+const saveBlogConfigBtn = document.getElementById("saveBlogConfigBtn");
+const generateBlogCommentBtn = document.getElementById("generateBlogCommentBtn");
+const blogPageUrlInput = document.getElementById("blogPageUrlInput");
+const openBlogCommentBtn = document.getElementById("openBlogCommentBtn");
+const refreshBlogCandidatesBtn = document.getElementById("refreshBlogCandidatesBtn");
+const blogAutoTbody = document.getElementById("blogAutoTbody");
+const currentCommentSystem = document.getElementById("currentCommentSystem");
+const inspectCurrentCommentBtn = document.getElementById("inspectCurrentCommentBtn");
+const generateCurrentCommentBtn = document.getElementById("generateCurrentCommentBtn");
+const prefillCurrentCommentBtn = document.getElementById("prefillCurrentCommentBtn");
+const submitCurrentCommentBtn = document.getElementById("submitCurrentCommentBtn");
+const semrushCompetitorInput = document.getElementById("semrushCompetitorInput");
+const openSemrushBacklinksBtn = document.getElementById("openSemrushBacklinksBtn");
+const refreshSemrushListBtn = document.getElementById("refreshSemrushListBtn");
+const semrushListStatus = document.getElementById("semrushListStatus");
+const semrushAutoTbody = document.getElementById("semrushAutoTbody");
 
 function normalizeDomain(input) {
   const cleaned = (input || "").trim().toLowerCase();
@@ -65,6 +90,16 @@ function parseTopics(input) {
     .map((x) => x.trim())
     .filter(Boolean)
     .slice(0, 6);
+}
+
+function normalizeUrl(input) {
+  const raw = String(input || "").trim();
+  if (!raw) return "";
+  try {
+    return new URL(raw.includes("://") ? raw : `https://${raw}`).toString();
+  } catch {
+    return "";
+  }
 }
 
 async function sendMessage(action, payload = {}) {
@@ -268,6 +303,10 @@ async function refreshPublishConfig() {
   if (openrouterKeyInput) openrouterKeyInput.value = config.openrouterApiKey || "";
   if (openrouterModelInput) openrouterModelInput.value = config.openrouterModel || "google/gemini-2.0-flash-001";
   if (autoSubmitProducthunt) autoSubmitProducthunt.checked = Boolean(config.autoSubmitProductHunt);
+  if (blogAuthorNameInput) blogAuthorNameInput.value = config.blogAuthorName || "";
+  if (blogAuthorEmailInput) blogAuthorEmailInput.value = config.blogAuthorEmail || "";
+  if (blogTargetUrlInput) blogTargetUrlInput.value = config.blogWebsiteUrl || "";
+  if (autoSubmitBlogComment) autoSubmitBlogComment.checked = Boolean(config.autoSubmitBlogComment);
 }
 
 function cellStatus(value) {
@@ -304,6 +343,84 @@ function renderRowsToTbody(rows, tbody) {
   }
 }
 
+function renderBlogAutoRows(rows) {
+  if (!blogAutoTbody) return;
+  blogAutoTbody.innerHTML = "";
+  if (!rows || rows.length === 0) {
+    blogAutoTbody.innerHTML = `<tr><td colspan="7">暂无免注册博客评论候选，先在“收集”里抓取资源。</td></tr>`;
+    return;
+  }
+
+  for (const row of rows) {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `
+      <td class="url"><a href="${row.url}" target="_blank">${row.url}</a></td>
+      <td>${row.domain || "-"}</td>
+      <td>${row.dr ?? "-"}</td>
+      <td>${row.traffic ?? "-"}</td>
+      <td>${row.spamScore ?? "-"}</td>
+      <td>${row.noRegisterReason || "-"}</td>
+      <td><button class="secondary" data-blog-url="${row.url}">打开写评论</button></td>
+    `;
+    blogAutoTbody.appendChild(tr);
+  }
+}
+
+function renderSemrushAutoRows(rows) {
+  if (!semrushAutoTbody) return;
+  semrushAutoTbody.innerHTML = "";
+  if (!rows || rows.length === 0) {
+    semrushAutoTbody.innerHTML = `<tr><td colspan="7">暂无 Semrush 待发清单，先输入竞品域名并打开采集。</td></tr>`;
+    if (semrushListStatus) semrushListStatus.textContent = "待发清单：0 条";
+    return;
+  }
+
+  if (semrushListStatus) semrushListStatus.textContent = `待发清单：${rows.length} 条，已按 DA 从高到低排序。`;
+  for (const row of rows) {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `
+      <td class="url"><a href="${row.url}" target="_blank">${row.url}</a></td>
+      <td>${row.domain || "-"}</td>
+      <td>${row.da ?? row.dr ?? "-"}</td>
+      <td>${row.traffic ?? "-"}</td>
+      <td>${row.publishableType || row.type || "-"}</td>
+      <td>${row.publishableReason || row.noRegisterReason || "-"}</td>
+      <td><button class="secondary" data-semrush-url="${row.url}">智能填表发布</button></td>
+    `;
+    semrushAutoTbody.appendChild(tr);
+  }
+}
+
+function renderPublishRecords(rows) {
+  if (!publishRecordsTbody) return;
+  publishRecordsTbody.innerHTML = "";
+  if (!rows || rows.length === 0) {
+    publishRecordsTbody.innerHTML = `<tr><td colspan="6">暂无发布记录。</td></tr>`;
+    return;
+  }
+  for (const row of rows) {
+    const pageUrl = row.blogPageUrl || row.targetUrl || "";
+    const screenshot = row.screenshotDataUrl
+      ? `<a href="${row.screenshotDataUrl}" target="_blank">查看</a>`
+      : "-";
+    const tr = document.createElement("tr");
+    tr.innerHTML = `
+      <td>${row.createdAt ? new Date(row.createdAt).toLocaleString() : "-"}</td>
+      <td class="url"><a href="${pageUrl}" target="_blank">${pageUrl || "-"}</a></td>
+      <td>${row.status || "-"}</td>
+      <td>${row.commentSystem || row.platform || "-"}</td>
+      <td>${row.linkStatus || "-"}${row.checkedAt ? `<br />${new Date(row.checkedAt).toLocaleString()}` : ""}</td>
+      <td>${screenshot}</td>
+    `;
+    publishRecordsTbody.appendChild(tr);
+  }
+}
+
+async function refreshPublishRecords() {
+  const result = await sendMessage("GET_PUBLISH_RECORDS");
+  if (result?.ok) renderPublishRecords(result.rows || []);
+}
+
 async function refreshResources() {
   const onlyNonSpam = filterNonSpam.checked;
   const onlyNoRegister = filterNoRegister.checked;
@@ -329,6 +446,24 @@ async function refreshResources() {
   });
   if (!resultForTab?.ok) return;
   renderRowsToTbody(resultForTab.rows || [], resourcesTabTbody);
+
+  const blogResult = await sendMessage("GET_RESOURCES", {
+    options: {
+      onlyNonSpam: true,
+      onlyNoRegister: true,
+      limit: 200
+    }
+  });
+  if (blogResult?.ok) renderBlogAutoRows(blogResult.rows || []);
+
+  const semrushResult = await sendMessage("GET_RESOURCES", {
+    options: {
+      semrushPublishableOnly: true,
+      limit: 300
+    }
+  });
+  if (semrushResult?.ok) renderSemrushAutoRows(semrushResult.rows || []);
+  await refreshPublishRecords();
 }
 
 tabs.forEach((tab) => {
@@ -339,6 +474,30 @@ filterNonSpam.addEventListener("change", refreshResources);
 filterNoRegister.addEventListener("change", refreshResources);
 resourceFilterNonSpam?.addEventListener("change", refreshResources);
 resourceFilterNoRegister?.addEventListener("change", refreshResources);
+refreshPublishRecordsBtn?.addEventListener("click", refreshPublishRecords);
+checkPublishLinksBtn?.addEventListener("click", async () => {
+  const result = await sendMessage("CHECK_PUBLISH_LINKS");
+  if (!result?.ok) {
+    alert(result?.error || "检查失败");
+    return;
+  }
+  await refreshPublishRecords();
+  alert(`检查完成：${result.checked || 0} 条`);
+});
+refreshBlogCandidatesBtn?.addEventListener("click", refreshResources);
+blogAutoTbody?.addEventListener("click", async (event) => {
+  const btn = event.target?.closest?.("button[data-blog-url]");
+  if (!btn) return;
+  if (blogPageUrlInput) blogPageUrlInput.value = btn.dataset.blogUrl || "";
+  await openSelectedBlogCommentPage();
+});
+refreshSemrushListBtn?.addEventListener("click", refreshResources);
+semrushAutoTbody?.addEventListener("click", async (event) => {
+  const btn = event.target?.closest?.("button[data-semrush-url]");
+  if (!btn) return;
+  if (blogPageUrlInput) blogPageUrlInput.value = btn.dataset.semrushUrl || "";
+  await openSelectedBlogCommentPage();
+});
 
 startBtn.addEventListener("click", async () => {
   const domain = normalizeDomain(domainInput.value);
@@ -437,11 +596,31 @@ openAhrefs.addEventListener("click", async (event) => {
   await chrome.tabs.create({ url: ahrefsBacklinkUrl(domain), active: true });
 });
 
+openSemrushBacklinksBtn?.addEventListener("click", async () => {
+  const domain = normalizeDomain(semrushCompetitorInput?.value || "");
+  if (!domain) {
+    alert("请输入正确的竞品 URL 或域名，例如 myclaw.ai");
+    return;
+  }
+  const result = await sendMessage("SEMRUSH_COLLECTION_START", { competitorDomain: domain });
+  if (!result?.ok) {
+    alert(result?.error || "打开 Semrush 失败");
+    return;
+  }
+  await refreshCollectionState();
+  await refreshCounts();
+  await refreshResources();
+});
+
 savePublishConfigBtn?.addEventListener("click", async () => {
   const config = {
     openrouterApiKey: openrouterKeyInput?.value?.trim() || "",
     openrouterModel: openrouterModelInput?.value?.trim() || "google/gemini-2.0-flash-001",
-    autoSubmitProductHunt: Boolean(autoSubmitProducthunt?.checked)
+    autoSubmitProductHunt: Boolean(autoSubmitProducthunt?.checked),
+    blogAuthorName: blogAuthorNameInput?.value?.trim() || "",
+    blogAuthorEmail: blogAuthorEmailInput?.value?.trim() || "",
+    blogWebsiteUrl: blogTargetUrlInput?.value?.trim() || "",
+    autoSubmitBlogComment: Boolean(autoSubmitBlogComment?.checked)
   };
   const result = await sendMessage("SAVE_PUBLISH_CONFIG", { config });
   if (!result?.ok) {
@@ -450,6 +629,153 @@ savePublishConfigBtn?.addEventListener("click", async () => {
   }
   alert("发布配置已保存");
 });
+
+saveBlogConfigBtn?.addEventListener("click", async () => {
+  const config = {
+    openrouterApiKey: openrouterKeyInput?.value?.trim() || "",
+    openrouterModel: openrouterModelInput?.value?.trim() || "google/gemini-2.0-flash-001",
+    blogAuthorName: blogAuthorNameInput?.value?.trim() || "",
+    blogAuthorEmail: blogAuthorEmailInput?.value?.trim() || "",
+    blogWebsiteUrl: blogTargetUrlInput?.value?.trim() || "",
+    autoSubmitBlogComment: Boolean(autoSubmitBlogComment?.checked)
+  };
+  const result = await sendMessage("SAVE_PUBLISH_CONFIG", { config });
+  if (!result?.ok) {
+    alert(result?.error || "保存配置失败");
+    return;
+  }
+  alert("博客外链配置已保存");
+});
+
+generateBlogCommentBtn?.addEventListener("click", async () => {
+  const targetUrl = normalizeUrl(blogTargetUrlInput?.value || "");
+  if (!targetUrl) {
+    alert("请先输入要做外链的 URL");
+    return;
+  }
+  const result = await sendMessage("GENERATE_BLOG_COMMENT_DRAFT", {
+    payload: {
+      targetUrl,
+      blogPageUrl: blogPageUrlInput?.value || "",
+      extraContext: blogExtraContextInput?.value || ""
+    }
+  });
+  if (!result?.ok) {
+    alert(result?.error || "生成失败");
+    return;
+  }
+  if (blogCommentInput) blogCommentInput.value = result.draft?.comment || "";
+});
+
+inspectCurrentCommentBtn?.addEventListener("click", async () => {
+  const result = await sendMessage("INSPECT_CURRENT_COMMENT_PAGE");
+  if (!result?.ok) {
+    alert(result?.error || "检测当前页失败");
+    return;
+  }
+  const info = result.inspection || {};
+  if (currentCommentSystem) {
+    currentCommentSystem.textContent = `当前页评论系统：${info.system || "unknown"}（${info.reason || "-"}）`;
+  }
+  if (blogPageUrlInput && info.pageUrl) blogPageUrlInput.value = info.pageUrl;
+});
+
+generateCurrentCommentBtn?.addEventListener("click", async () => {
+  const targetUrl = normalizeUrl(blogTargetUrlInput?.value || "");
+  if (!targetUrl) {
+    alert("请先输入要做外链的 URL");
+    return;
+  }
+  const result = await sendMessage("GENERATE_CURRENT_PAGE_BLOG_COMMENT", {
+    payload: {
+      targetUrl,
+      extraContext: blogExtraContextInput?.value || ""
+    }
+  });
+  if (!result?.ok) {
+    alert(result?.error || "按当前文章生成失败");
+    return;
+  }
+  if (blogCommentInput) blogCommentInput.value = result.draft?.comment || "";
+  const info = result.inspection || {};
+  if (currentCommentSystem) {
+    currentCommentSystem.textContent = `当前页评论系统：${info.system || "unknown"}（${info.article?.title || info.reason || "-"}）`;
+  }
+  if (blogPageUrlInput && info.pageUrl) blogPageUrlInput.value = info.pageUrl;
+});
+
+prefillCurrentCommentBtn?.addEventListener("click", async () => {
+  const targetUrl = normalizeUrl(blogTargetUrlInput?.value || "");
+  const comment = blogCommentInput?.value?.trim() || "";
+  if (!targetUrl) {
+    alert("请先输入要做外链的 URL");
+    return;
+  }
+  if (!comment) {
+    alert("请先生成或填写评论内容");
+    return;
+  }
+  const result = await sendMessage("PREFILL_CURRENT_PAGE_BLOG_COMMENT", {
+    payload: {
+      targetUrl,
+      authorName: blogAuthorNameInput?.value || "",
+      authorEmail: blogAuthorEmailInput?.value || "",
+      comment
+    }
+  });
+  if (!result?.ok) {
+    alert(result?.error || "预填当前页失败");
+    return;
+  }
+  alert("已预填当前页，请确认评论内容后再点“一键提交”。");
+});
+
+submitCurrentCommentBtn?.addEventListener("click", async () => {
+  if (!confirm("确认提交当前页面的评论？")) return;
+  const result = await sendMessage("SUBMIT_CURRENT_PAGE_BLOG_COMMENT", {
+    payload: {
+      targetUrl: normalizeUrl(blogTargetUrlInput?.value || ""),
+      comment: blogCommentInput?.value || ""
+    }
+  });
+  if (!result?.ok) {
+    alert(result?.error || "提交失败");
+    return;
+  }
+  await refreshCounts();
+  alert("已尝试提交，并保存截图和发布记录。");
+});
+
+async function openSelectedBlogCommentPage() {
+  const blogPageUrl = normalizeUrl(blogPageUrlInput?.value || "");
+  const targetUrl = normalizeUrl(blogTargetUrlInput?.value || "");
+  if (!blogPageUrl) {
+    alert("请先选择或输入博客评论页 URL");
+    return;
+  }
+  if (!targetUrl) {
+    alert("请先输入要做外链的 URL");
+    return;
+  }
+  const result = await sendMessage("OPEN_AND_FILL_BLOG_COMMENT", {
+    payload: {
+      blogPageUrl,
+      targetUrl,
+      authorName: blogAuthorNameInput?.value || "",
+      authorEmail: blogAuthorEmailInput?.value || "",
+      comment: blogCommentInput?.value || "",
+      extraContext: blogExtraContextInput?.value || "",
+      autoSubmit: Boolean(autoSubmitBlogComment?.checked)
+    }
+  });
+  if (!result?.ok) {
+    alert(result?.error || "打开博客评论页失败");
+    return;
+  }
+  alert("已打开博客评论页，插件会自动填写评论表单。若未填充，请等待页面加载完成后再点一次。");
+}
+
+openBlogCommentBtn?.addEventListener("click", openSelectedBlogCommentPage);
 
 generatePhDraftBtn?.addEventListener("click", async () => {
   const targetUrl = phTargetUrlInput?.value?.trim() || "";

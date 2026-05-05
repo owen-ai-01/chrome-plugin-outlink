@@ -7,13 +7,18 @@
     "storage",
     "tabs",
     "scripting",
-    "sidePanel"
+    "sidePanel",
+    "activeTab",
+    "webNavigation"
   ],
   "host_permissions": [
     "https://openrouter.ai/*",
     "https://www.producthunt.com/*",
+    "https://sem.3ue.co/*",
     "https://ahrefs.com/*",
-    "https://*.ahrefs.com/*"
+    "https://*.ahrefs.com/*",
+    "http://*/*",
+    "https://*/*"
   ],
   "background": {
     "service_worker": "background-v2.js",
@@ -29,7 +34,8 @@
     {
       "matches": [
         "https://ahrefs.com/*",
-        "https://*.ahrefs.com/*"
+        "https://*.ahrefs.com/*",
+        "https://sem.3ue.co/*"
       ],
       "js": [
         "content/interceptor.js"
@@ -44,6 +50,23 @@
         "content/producthunt-publisher.js"
       ],
       "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "http://*/*",
+        "https://*/*"
+      ],
+      "exclude_matches": [
+        "https://ahrefs.com/*",
+        "https://*.ahrefs.com/*",
+        "https://sem.3ue.co/*",
+        "https://www.producthunt.com/*"
+      ],
+      "js": [
+        "content/blog-comment-publisher.js"
+      ],
+      "run_at": "document_idle",
+      "all_frames": true
     }
   ],
   "web_accessible_resources": [
@@ -53,7 +76,8 @@
       ],
       "matches": [
         "https://ahrefs.com/*",
-        "https://*.ahrefs.com/*"
+        "https://*.ahrefs.com/*",
+        "https://sem.3ue.co/*"
       ]
     }
   ]

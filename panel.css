@@ -44,7 +44,7 @@ body {
 
 .tabs {
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-columns: repeat(7, minmax(0, 1fr));
   gap: 6px;
   margin-bottom: 10px;
 }
@@ -188,6 +188,11 @@ button {
   border-radius: 10px;
   overflow: auto;
   max-height: 360px;
+}
+
+.table-wrap.compact {
+  margin-top: 10px;
+  max-height: 300px;
 }
 
 .resource-table {
