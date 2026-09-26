@@ -1,6 +1,7 @@
 (function pageNetworkHook() {
   const ahrefsChecker = location.hostname.includes("ahrefs.com") && location.pathname.includes("/backlink-checker");
-  const semrushBacklinks = location.hostname === "sem.3ue.co" && location.pathname.includes("/analytics/backlinks/backlinks");
+  const semrushHost = location.hostname === "sem.3ue.co" || location.hostname === "sem.3ue.com" || location.hostname === "semrush.com" || location.hostname.endsWith(".semrush.com");
+  const semrushBacklinks = semrushHost && location.pathname.includes("/analytics/backlinks");
   if (!ahrefsChecker && !semrushBacklinks) return;
   const requestHints = ["backlink", "backlinks", "refdomain", "referring", "site-explorer", "links"];
   const source = semrushBacklinks ? "semrush" : "ahrefs";

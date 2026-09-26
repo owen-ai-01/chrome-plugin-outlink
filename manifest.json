@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Outlink Collector",
-  "description": "Collect, analyze, and publish outlink resources.",
-  "version": "0.1.0",
+  "description": "Discover backlink opportunities and assist with reviewed, relevant blog comments.",
+  "version": "1.0.0",
   "permissions": [
     "storage",
     "tabs",
@@ -10,11 +10,15 @@
     "sidePanel",
     "activeTab",
     "webNavigation"
+    ,"alarms"
   ],
   "host_permissions": [
     "https://openrouter.ai/*",
     "https://www.producthunt.com/*",
     "https://sem.3ue.co/*",
+    "https://sem.3ue.com/*",
+    "https://www.semrush.com/*",
+    "https://*.semrush.com/*",
     "https://ahrefs.com/*",
     "https://*.ahrefs.com/*",
     "http://*/*",
@@ -36,6 +40,9 @@
         "https://ahrefs.com/*",
         "https://*.ahrefs.com/*",
         "https://sem.3ue.co/*"
+        ,"https://sem.3ue.com/*",
+        "https://www.semrush.com/*",
+        "https://*.semrush.com/*"
       ],
       "js": [
         "content/interceptor.js"
@@ -60,6 +67,9 @@
         "https://ahrefs.com/*",
         "https://*.ahrefs.com/*",
         "https://sem.3ue.co/*",
+        "https://sem.3ue.com/*",
+        "https://www.semrush.com/*",
+        "https://*.semrush.com/*",
         "https://www.producthunt.com/*"
       ],
       "js": [
@@ -72,12 +82,16 @@
   "web_accessible_resources": [
     {
       "resources": [
-        "content/page-hook.js"
+        "content/page-hook.js",
+        "lib/xlsx.full.min.js"
       ],
       "matches": [
         "https://ahrefs.com/*",
         "https://*.ahrefs.com/*",
         "https://sem.3ue.co/*"
+        ,"https://sem.3ue.com/*",
+        "https://www.semrush.com/*",
+        "https://*.semrush.com/*"
       ]
     }
   ]

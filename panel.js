@@ -47,10 +47,13 @@ const phDescInput = document.getElementById("phDescInput");
 const phCommentInput = document.getElementById("phCommentInput");
 const phTopicsInput = document.getElementById("phTopicsInput");
 const blogTargetUrlInput = document.getElementById("blogTargetUrlInput");
+const blogSiteNameInput = document.getElementById("blogSiteNameInput");
+const blogKeywordInput = document.getElementById("blogKeywordInput");
 const blogAuthorNameInput = document.getElementById("blogAuthorNameInput");
 const blogAuthorEmailInput = document.getElementById("blogAuthorEmailInput");
 const blogExtraContextInput = document.getElementById("blogExtraContextInput");
 const blogCommentInput = document.getElementById("blogCommentInput");
+const blogFallbackCommentInput = document.getElementById("blogFallbackCommentInput");
 const autoSubmitBlogComment = document.getElementById("autoSubmitBlogComment");
 const saveBlogConfigBtn = document.getElementById("saveBlogConfigBtn");
 const generateBlogCommentBtn = document.getElementById("generateBlogCommentBtn");
@@ -68,6 +71,8 @@ const openSemrushBacklinksBtn = document.getElementById("openSemrushBacklinksBtn
 const refreshSemrushListBtn = document.getElementById("refreshSemrushListBtn");
 const semrushListStatus = document.getElementById("semrushListStatus");
 const semrushAutoTbody = document.getElementById("semrushAutoTbody");
+const refreshLogsBtn = document.getElementById("refreshLogsBtn");
+const logsList = document.getElementById("logsList");
 
 function normalizeDomain(input) {
   const cleaned = (input || "").trim().toLowerCase();
@@ -114,7 +119,7 @@ function escapeCell(value) {
   return raw;
 }
 
-function buildXlsxTextRows(rows) {
+function buildCsvRows(rows) {
   const headers = [
     "Type",
     "URL",
@@ -130,7 +135,7 @@ function buildXlsxTextRows(rows) {
     "博客评论",
     "免注册候选"
   ];
-  const lines = [headers.join("\t")];
+  const lines = [headers.map(escapeCell).join(",")];
   for (const row of rows) {
     const line = [
       row.type || "",
@@ -148,7 +153,7 @@ function buildXlsxTextRows(rows) {
       row.noRegisterLikely && row.isNonSpam ? "Yes" : "No"
     ]
       .map(escapeCell)
-      .join("\t");
+      .join(",");
     lines.push(line);
   }
   return `\uFEFF${lines.join("\n")}`;
@@ -225,7 +230,18 @@ function parseRowsFromTabularText(text) {
     "目标域名": "targetDomain"
   };
   const firstRowHeaders = allRows[0].map(normalizeHeaderKey);
-  const headerMatches = firstRowHeaders.filter((h) => Object.prototype.hasOwnProperty.call(knownHeaders, h)).length;
+  const inferHeader = (header) => {
+    if (knownHeaders[header]) return knownHeaders[header];
+    if (/url|link|外链|链接/.test(header)) return "url";
+    if (/anchor|锚文本/.test(header)) return "anchor";
+    if (/domain rating|authority score|\bdr\b|\bda\b|域名权重/.test(header)) return "dr";
+    if (/traffic|流量/.test(header)) return "traffic";
+    if (/first seen|首次发现/.test(header)) return "firstSeen";
+    if (/last seen|最后检测/.test(header)) return "lastSeen";
+    if (/link type|链接类型/.test(header)) return "linkType";
+    return null;
+  };
+  const headerMatches = firstRowHeaders.filter((h) => inferHeader(h)).length;
   const hasHeader = headerMatches >= 2;
 
   const defaultOrder = [
@@ -245,7 +261,7 @@ function parseRowsFromTabularText(text) {
   ];
 
   const mapping = hasHeader
-    ? allRows[0].map((h) => knownHeaders[normalizeHeaderKey(h)] || null)
+    ? allRows[0].map((h) => inferHeader(normalizeHeaderKey(h)))
     : defaultOrder;
   const startIndex = hasHeader ? 1 : 0;
   const rows = [];
@@ -306,7 +322,10 @@ async function refreshPublishConfig() {
   if (blogAuthorNameInput) blogAuthorNameInput.value = config.blogAuthorName || "";
   if (blogAuthorEmailInput) blogAuthorEmailInput.value = config.blogAuthorEmail || "";
   if (blogTargetUrlInput) blogTargetUrlInput.value = config.blogWebsiteUrl || "";
+  if (blogSiteNameInput) blogSiteNameInput.value = config.blogSiteName || "";
+  if (blogKeywordInput) blogKeywordInput.value = config.blogKeyword || "";
   if (autoSubmitBlogComment) autoSubmitBlogComment.checked = Boolean(config.autoSubmitBlogComment);
+  if (blogFallbackCommentInput) blogFallbackCommentInput.value = config.blogFallbackComment || "";
 }
 
 function cellStatus(value) {
@@ -317,7 +336,7 @@ function renderRowsToTbody(rows, tbody) {
   if (!tbody) return;
   tbody.innerHTML = "";
   if (!rows || rows.length === 0) {
-    tbody.innerHTML = `<tr><td colspan="13">暂无数据，先点击“开始收集”。</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="17">暂无数据，先点击“开始收集”。</td></tr>`;
     return;
   }
 
@@ -334,7 +353,11 @@ function renderRowsToTbody(rows, tbody) {
       <td>${row.linkFormat || "unknown"}</td>
       <td>${row.hasUrlField || "unknown"}</td>
       <td>${row.dr ?? "-"}</td>
+      <td>${row.pageScore ?? "-"}</td>
+      <td>${row.linkType || "unknown"}</td>
       <td>${row.traffic ?? "-"}</td>
+      <td>${row.firstSeen || "-"}</td>
+      <td>${row.lastSeen || "-"}</td>
       <td>${row.spamScore ?? "-"}</td>
       <td>${cellStatus(row.isBlogCommentCandidate)}</td>
       <td title="${row.noRegisterReason || ""}">${cellStatus(row.noRegisterLikely && row.isNonSpam)}</td>
@@ -421,6 +444,23 @@ async function refreshPublishRecords() {
   if (result?.ok) renderPublishRecords(result.rows || []);
 }
 
+async function refreshLogs() {
+  const result = await sendMessage("GET_LOGS");
+  if (!result?.ok || !logsList) return;
+  logsList.innerHTML = "";
+  for (const row of result.rows || []) {
+    const div = document.createElement("div");
+    div.className = `log-row ${row.level === "error" ? "error" : ""}`;
+    const time = document.createElement("time");
+    time.textContent = row.ts ? new Date(row.ts).toLocaleString() : "";
+    const text = document.createElement("span");
+    text.textContent = row.message || "";
+    div.append(time, text);
+    logsList.appendChild(div);
+  }
+  if (!logsList.childElementCount) logsList.textContent = "暂无日志。";
+}
+
 async function refreshResources() {
   const onlyNonSpam = filterNonSpam.checked;
   const onlyNoRegister = filterNoRegister.checked;
@@ -492,6 +532,7 @@ blogAutoTbody?.addEventListener("click", async (event) => {
   await openSelectedBlogCommentPage();
 });
 refreshSemrushListBtn?.addEventListener("click", refreshResources);
+refreshLogsBtn?.addEventListener("click", refreshLogs);
 semrushAutoTbody?.addEventListener("click", async (event) => {
   const btn = event.target?.closest?.("button[data-semrush-url]");
   if (!btn) return;
@@ -555,9 +596,15 @@ exportXlsxBtn.addEventListener("click", async () => {
     alert(result?.error || "导出失败");
     return;
   }
-  const text = buildXlsxTextRows(result.rows || []);
-  const fileName = `outlink-resources-${new Date().toISOString().replace(/[:.]/g, "-")}.xlsx`;
-  downloadTextFile(fileName, text, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+  if (!globalThis.XLSX) {
+    alert("XLSX 组件未加载，请重新加载插件");
+    return;
+  }
+  const rows = result.rows || [];
+  const sheet = XLSX.utils.json_to_sheet(rows);
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(workbook, sheet, "Resources");
+  XLSX.writeFile(workbook, `outlink-resources-${new Date().toISOString().replace(/[:.]/g, "-")}.xlsx`);
 });
 
 importBtn.addEventListener("click", () => {
@@ -566,24 +613,32 @@ importBtn.addEventListener("click", () => {
 });
 
 importFileInput.addEventListener("change", async () => {
-  const file = importFileInput.files?.[0];
-  if (!file) return;
+  const files = Array.from(importFileInput.files || []);
+  if (!files.length) return;
   try {
-    const name = (file.name || "").toLowerCase();
-    const text = await file.text();
-    let result;
-    if (name.endsWith(".json")) {
-      const payload = JSON.parse(text);
-      result = await sendMessage("IMPORT_BACKUP_PAYLOAD", { payload });
-    } else {
-      const rows = parseRowsFromTabularText(text);
-      result = await sendMessage("IMPORT_RESOURCES_ROWS", { rows });
+    let imported = 0;
+    for (const file of files) {
+      const name = (file.name || "").toLowerCase();
+      let result;
+      if (name.endsWith(".json")) {
+        const payload = JSON.parse(await file.text());
+        result = await sendMessage("IMPORT_BACKUP_PAYLOAD", { payload });
+      } else if (name.endsWith(".xlsx") || name.endsWith(".xls")) {
+        if (!globalThis.XLSX) throw new Error("XLSX 组件未加载");
+        const workbook = XLSX.read(await file.arrayBuffer(), { type: "array" });
+        const first = workbook.Sheets[workbook.SheetNames[0]];
+        const rows = XLSX.utils.sheet_to_json(first, { defval: "" });
+        result = await sendMessage("IMPORT_RESOURCES_ROWS", { rows });
+      } else {
+        result = await sendMessage("IMPORT_RESOURCES_ROWS", { rows: parseRowsFromTabularText(await file.text()) });
+      }
+      if (!result?.ok) throw new Error(`${file.name}: ${result?.error || "导入失败"}`);
+      imported += Number(result.imported || 0);
     }
-    if (!result?.ok) throw new Error(result?.error || "导入失败");
     await refreshCollectionState();
     await refreshCounts();
     await refreshResources();
-    alert(`导入成功${typeof result.imported === "number" ? `，新增/更新 ${result.imported} 条` : ""}`);
+    alert(`导入成功，共处理 ${files.length} 个文件，新增/更新 ${imported} 条资源`);
   } catch (error) {
     alert(`导入失败：${error?.message || String(error)}`);
   }
@@ -617,10 +672,13 @@ savePublishConfigBtn?.addEventListener("click", async () => {
     openrouterApiKey: openrouterKeyInput?.value?.trim() || "",
     openrouterModel: openrouterModelInput?.value?.trim() || "google/gemini-2.0-flash-001",
     autoSubmitProductHunt: Boolean(autoSubmitProducthunt?.checked),
+    blogSiteName: blogSiteNameInput?.value?.trim() || "",
+    blogKeyword: blogKeywordInput?.value?.trim() || "",
     blogAuthorName: blogAuthorNameInput?.value?.trim() || "",
     blogAuthorEmail: blogAuthorEmailInput?.value?.trim() || "",
     blogWebsiteUrl: blogTargetUrlInput?.value?.trim() || "",
-    autoSubmitBlogComment: Boolean(autoSubmitBlogComment?.checked)
+    autoSubmitBlogComment: Boolean(autoSubmitBlogComment?.checked),
+    blogFallbackComment: blogFallbackCommentInput?.value?.trim() || ""
   };
   const result = await sendMessage("SAVE_PUBLISH_CONFIG", { config });
   if (!result?.ok) {
@@ -634,10 +692,13 @@ saveBlogConfigBtn?.addEventListener("click", async () => {
   const config = {
     openrouterApiKey: openrouterKeyInput?.value?.trim() || "",
     openrouterModel: openrouterModelInput?.value?.trim() || "google/gemini-2.0-flash-001",
+    blogSiteName: blogSiteNameInput?.value?.trim() || "",
+    blogKeyword: blogKeywordInput?.value?.trim() || "",
     blogAuthorName: blogAuthorNameInput?.value?.trim() || "",
     blogAuthorEmail: blogAuthorEmailInput?.value?.trim() || "",
     blogWebsiteUrl: blogTargetUrlInput?.value?.trim() || "",
-    autoSubmitBlogComment: Boolean(autoSubmitBlogComment?.checked)
+    autoSubmitBlogComment: Boolean(autoSubmitBlogComment?.checked),
+    blogFallbackComment: blogFallbackCommentInput?.value?.trim() || ""
   };
   const result = await sendMessage("SAVE_PUBLISH_CONFIG", { config });
   if (!result?.ok) {
@@ -656,6 +717,8 @@ generateBlogCommentBtn?.addEventListener("click", async () => {
   const result = await sendMessage("GENERATE_BLOG_COMMENT_DRAFT", {
     payload: {
       targetUrl,
+      siteName: blogSiteNameInput?.value || "",
+      keyword: blogKeywordInput?.value || "",
       blogPageUrl: blogPageUrlInput?.value || "",
       extraContext: blogExtraContextInput?.value || ""
     }
@@ -675,7 +738,13 @@ inspectCurrentCommentBtn?.addEventListener("click", async () => {
   }
   const info = result.inspection || {};
   if (currentCommentSystem) {
-    currentCommentSystem.textContent = `当前页评论系统：${info.system || "unknown"}（${info.reason || "-"}）`;
+    const flags = [
+      info.hasUrlField ? "有 Website 字段" : "无 Website 字段",
+      info.hasCaptcha ? "有验证码" : "无验证码",
+      info.loginRequired ? "需要登录" : "无需登录",
+      `建议：${info.recommendedAction || "未知"}`
+    ];
+    currentCommentSystem.textContent = `当前页：${info.system || "unknown"}｜${flags.join("｜")}`;
   }
   if (blogPageUrlInput && info.pageUrl) blogPageUrlInput.value = info.pageUrl;
 });
@@ -689,6 +758,8 @@ generateCurrentCommentBtn?.addEventListener("click", async () => {
   const result = await sendMessage("GENERATE_CURRENT_PAGE_BLOG_COMMENT", {
     payload: {
       targetUrl,
+      siteName: blogSiteNameInput?.value || "",
+      keyword: blogKeywordInput?.value || "",
       extraContext: blogExtraContextInput?.value || ""
     }
   });
@@ -720,7 +791,8 @@ prefillCurrentCommentBtn?.addEventListener("click", async () => {
       targetUrl,
       authorName: blogAuthorNameInput?.value || "",
       authorEmail: blogAuthorEmailInput?.value || "",
-      comment
+      comment,
+      fallbackComment: blogFallbackCommentInput?.value || ""
     }
   });
   if (!result?.ok) {
@@ -757,6 +829,7 @@ async function openSelectedBlogCommentPage() {
     alert("请先输入要做外链的 URL");
     return;
   }
+  if (autoSubmitBlogComment?.checked && !confirm("已开启自动提交。确认让插件在这一个页面填写后点击提交吗？遇到验证码仍会停止。")) return;
   const result = await sendMessage("OPEN_AND_FILL_BLOG_COMMENT", {
     payload: {
       blogPageUrl,
@@ -764,6 +837,7 @@ async function openSelectedBlogCommentPage() {
       authorName: blogAuthorNameInput?.value || "",
       authorEmail: blogAuthorEmailInput?.value || "",
       comment: blogCommentInput?.value || "",
+      fallbackComment: blogFallbackCommentInput?.value || "",
       extraContext: blogExtraContextInput?.value || "",
       autoSubmit: Boolean(autoSubmitBlogComment?.checked)
     }
@@ -835,6 +909,7 @@ async function init() {
   await refreshCollectionState();
   await refreshResources();
   await refreshPublishConfig();
+  await refreshLogs();
   setInterval(async () => {
     await refreshCounts();
     await refreshCollectionState();

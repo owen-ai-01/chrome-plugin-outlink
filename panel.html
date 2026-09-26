@@ -15,7 +15,7 @@
           <button id="exportXlsxBtn" class="ghost">导出XLSX</button>
           <button id="importBtn" class="ghost">导入备份</button>
           <button id="resetBtn" class="ghost">重置数据</button>
-          <input id="importFileInput" type="file" accept=".json,.xlsx,.csv,.tsv,application/json" hidden />
+          <input id="importFileInput" type="file" accept=".json,.csv,.tsv,.xlsx,.xls,application/json,text/csv" multiple hidden />
         </div>
       </header>
 
@@ -27,6 +27,10 @@
         <button class="tab" data-tab="publish">发布 <span id="badge-publish" class="badge">0</span></button>
         <button class="tab" data-tab="logs">日志 <span id="badge-logs" class="badge">0</span></button>
         <button class="tab" data-tab="resources">资源库 <span id="badge-resources" class="badge">0</span></button>
+        <button class="tab" data-tab="sites">推广项目</button>
+        <button class="tab" data-tab="templates">模板</button>
+        <button class="tab" data-tab="queue">任务队列</button>
+        <button class="tab" data-tab="analytics">统计与同步</button>
       </nav>
 
       <section class="panel active" id="panel-collect">
@@ -91,7 +95,11 @@
                 <th>Link Format</th>
                 <th>Has URL Field</th>
                 <th>DR</th>
+                <th>页面权重</th>
+                <th>链接属性</th>
                 <th>Traffic</th>
+                <th>首次发现</th>
+                <th>最后检测</th>
                 <th>SPAM</th>
                 <th>博客评论</th>
                 <th>免注册候选</th>
@@ -125,15 +133,19 @@
       </section>
 
       <section class="panel" id="panel-blog-auto">
+        <div class="notice">默认采用“AI 生成 → 自动填表 → 人工检查 → 手动提交”。插件不会绕过登录或验证码。</div>
         <div class="form-grid">
+          <input id="blogSiteNameInput" type="text" placeholder="推广网站名称，例如 My Game Hub" />
           <input id="blogTargetUrlInput" type="text" placeholder="要做外链的 URL，例如 https://example.com" />
+          <input id="blogKeywordInput" type="text" placeholder="网站主题/关键词，例如 browser games" />
           <input id="blogAuthorNameInput" type="text" placeholder="评论作者名" />
           <input id="blogAuthorEmailInput" type="email" placeholder="评论邮箱（部分博客必填）" />
           <input id="blogExtraContextInput" type="text" placeholder="评论补充说明（可选）" />
           <textarea id="blogCommentInput" placeholder="博客评论内容"></textarea>
+          <textarea id="blogFallbackCommentInput" placeholder="没有 Website 字段时使用的备用评论（建议保持无链接、自然相关）"></textarea>
         </div>
         <div class="source-row">
-          <label><input id="autoSubmitBlogComment" type="checkbox" /> 自动点击评论提交按钮（谨慎）</label>
+          <label><input id="autoSubmitBlogComment" type="checkbox" /> 对当前选中页面自动点击提交（每次仍需确认）</label>
           <button id="saveBlogConfigBtn" class="secondary">保存配置</button>
           <button id="generateBlogCommentBtn" class="primary">AI 生成评论</button>
         </div>
@@ -158,7 +170,11 @@
                 <th>URL</th>
                 <th>Domain</th>
                 <th>DR</th>
+                <th>页面权重</th>
+                <th>链接属性</th>
                 <th>Traffic</th>
+                <th>首次发现</th>
+                <th>最后检测</th>
                 <th>SPAM</th>
                 <th>原因</th>
                 <th>操作</th>
@@ -223,7 +239,8 @@
       </section>
 
       <section class="panel" id="panel-logs">
-        <p>日志已入库。下一步可做筛选、搜索和导出。</p>
+        <div class="source-row"><button id="refreshLogsBtn" class="secondary">刷新日志</button></div>
+        <div id="logsList" class="logs-list"></div>
       </section>
 
       <section class="panel" id="panel-resources">
@@ -254,7 +271,78 @@
           </table>
         </div>
       </section>
+
+      <section class="panel" id="panel-sites">
+        <h2>推广网站</h2>
+        <div class="form-grid two-col">
+          <input id="siteEditId" type="hidden" />
+          <input id="siteName" placeholder="网站名称" />
+          <input id="siteUrl" placeholder="https://example.com" />
+          <input id="siteKeyword" placeholder="主题/关键词" />
+          <input id="siteAuthorName" placeholder="评论作者名" />
+          <input id="siteAuthorEmail" type="email" placeholder="评论邮箱" />
+          <select id="siteLanguage"><option value="auto">自动识别语言</option><option value="en">英文</option><option value="zh">中文</option></select>
+        </div>
+        <div class="source-row"><button id="saveSiteBtn" class="primary">保存推广网站</button><button id="clearSiteBtn" class="secondary">新建</button></div>
+        <div id="siteList" class="manage-list"></div>
+
+        <h2>发布策略</h2>
+        <div class="form-grid two-col">
+          <input id="delaySeconds" type="number" min="5" placeholder="基础间隔秒数" />
+          <input id="randomDelaySeconds" type="number" min="0" placeholder="随机增加秒数" />
+          <input id="dailyLimit" type="number" min="1" placeholder="每日最多任务" />
+          <input id="perDomainLimit" type="number" min="1" placeholder="每域名最多任务" />
+          <textarea id="blacklist" placeholder="黑名单域名，每行一个"></textarea>
+          <textarea id="whitelist" placeholder="白名单域名；留空表示不限"></textarea>
+          <label><input id="scheduleEnabled" type="checkbox" /> 启用定时采集</label>
+          <input id="scheduleHours" type="number" min="1" placeholder="每隔多少小时" />
+          <textarea id="scheduledDomains" placeholder="定时采集竞品域名，每行一个"></textarea>
+        </div>
+        <button id="saveStrategyBtn" class="primary">保存发布策略</button>
+      </section>
+
+      <section class="panel" id="panel-templates">
+        <h2>评论模板</h2>
+        <div class="form-grid">
+          <input id="templateEditId" type="hidden" />
+          <input id="templateName" placeholder="模板名称" />
+          <select id="templateLanguage"><option value="auto">自动</option><option value="en">英文</option><option value="zh">中文</option></select>
+          <textarea id="templateContent" placeholder="支持 {siteName} {siteUrl} {keyword} {date} {year}"></textarea>
+        </div>
+        <div class="source-row"><button id="saveTemplateBtn" class="primary">保存模板</button><button id="clearTemplateBtn" class="secondary">新建</button><button id="exportTemplatesBtn" class="secondary">导出模板</button><button id="importTemplatesBtn" class="secondary">导入模板</button><input id="templateFileInput" type="file" accept=".json" hidden /></div>
+        <div id="templateList" class="manage-list"></div>
+      </section>
+
+      <section class="panel" id="panel-queue">
+        <div class="form-grid two-col">
+          <select id="queueSiteSelect"><option value="">选择推广网站</option></select>
+          <input id="queueSearch" placeholder="按 URL/域名搜索资源" />
+          <select id="queueMinDr"><option value="0">不限 DR</option><option value="10">DR ≥ 10</option><option value="30">DR ≥ 30</option><option value="50">DR ≥ 50</option></select>
+          <select id="queueResourceStatus"><option value="candidate">可用候选</option><option value="all">全部资源</option><option value="blog">博客评论候选</option></select>
+          <select id="queueLinkType"><option value="all">全部链接属性</option><option value="follow">Follow</option><option value="nofollow">Nofollow/UGC</option></select>
+          <select id="queueAge"><option value="all">不限发现时间</option><option value="30">最近30天</option><option value="90">最近90天</option></select>
+        </div>
+        <div class="source-row"><button id="selectVisibleBtn" class="secondary">选择当前结果</button><button id="createQueueBtn" class="primary">加入审核队列</button><button id="deleteSelectedResourcesBtn" class="danger">删除选中资源</button><button id="exportPublishedBtn" class="secondary">导出已发布</button><button id="exportPendingBtn" class="secondary">导出未发布</button></div>
+        <div id="resourceManageList" class="manage-list tall"></div>
+        <h2>审核队列</h2>
+        <div class="source-row"><button id="openNextQueueBtn" class="primary">打开下一条并填表</button><button id="refreshQueueBtn" class="secondary">刷新</button></div>
+        <div id="queueList" class="manage-list"></div>
+      </section>
+
+      <section class="panel" id="panel-analytics">
+        <div id="analyticsCards" class="stats-grid"></div>
+        <div id="analyticsBreakdown" class="manage-list"></div>
+        <h2>Google Sheets 同步</h2>
+        <div class="notice">使用你自己的 Google Apps Script Web App HTTPS 地址。同步会把资源、发布记录和推广项目发送到该地址。</div>
+        <div class="form-grid">
+          <input id="sheetEndpointUrl" placeholder="Google Apps Script Web App URL" />
+          <input id="sheetName" placeholder="工作表名称，例如 Resources" />
+        </div>
+        <div class="source-row"><button id="saveSheetSettingsBtn" class="secondary">保存同步配置</button><button id="syncSheetsBtn" class="primary">立即同步</button></div>
+      </section>
     </main>
+    <script src="lib/xlsx.full.min.js"></script>
     <script type="module" src="panel.js"></script>
+    <script type="module" src="panel-features.js"></script>
   </body>
   </html>

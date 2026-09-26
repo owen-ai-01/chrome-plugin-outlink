@@ -1,6 +1,7 @@
 (function interceptBacklinkResponses() {
   const ahrefsChecker = location.hostname.includes("ahrefs.com") && location.pathname.includes("/backlink-checker");
-  const semrushBacklinks = location.hostname === "sem.3ue.co" && location.pathname.includes("/analytics/backlinks/backlinks");
+  const semrushHost = location.hostname === "sem.3ue.co" || location.hostname === "sem.3ue.com" || location.hostname === "semrush.com" || location.hostname.endsWith(".semrush.com");
+  const semrushBacklinks = semrushHost && location.pathname.includes("/analytics/backlinks");
   if (!ahrefsChecker && !semrushBacklinks) return;
   let autoPagerRunning = false;
   let noNextCount = 0;
@@ -74,7 +75,7 @@
       const links = Array.from(row.querySelectorAll("a[href]"));
       const href = links
         .map((a) => a.href)
-        .find((x) => /^https?:\/\//i.test(x) && !x.includes("sem.3ue.co") && !x.includes("semrush.com"));
+        .find((x) => /^https?:\/\//i.test(x) && !x.includes("sem.3ue.co") && !x.includes("sem.3ue.com") && !x.includes("semrush.com"));
       if (!href) continue;
 
       const rowText = row.textContent || "";

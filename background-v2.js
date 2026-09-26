@@ -1,3 +1,5 @@
+import "./feature-store.js";
+
 const DB_KEY = "outlink_db_v2";
 const DEFAULT_DB = {
   tables: {
@@ -10,9 +12,12 @@ const DEFAULT_DB = {
     openrouterApiKey: "",
     openrouterModel: "google/gemini-2.0-flash-001",
     autoSubmitProductHunt: false,
+    blogSiteName: "",
+    blogKeyword: "",
     blogAuthorName: "",
     blogAuthorEmail: "",
     blogWebsiteUrl: "",
+    blogFallbackComment: "",
     autoSubmitBlogComment: false
   },
   publishState: {
@@ -299,7 +304,9 @@ function parseDomainFromDiscoveredFrom(value) {
 }
 
 function buildImportedResource(input) {
-  const url = normalizeUrl(input.url || input.URL || "");
+  const entries = Object.entries(input || {});
+  const findValue = (patterns) => entries.find(([key]) => patterns.some((pattern) => String(key).toLowerCase().includes(pattern)))?.[1];
+  const url = normalizeUrl(input.url || input.URL || findValue(["url", "link", "外链", "链接"]) || "");
   if (!url) return null;
   const now = new Date().toISOString();
   let domain = "";
@@ -313,7 +320,7 @@ function buildImportedResource(input) {
   const targetDomain = normalizeDomain(input.targetDomain || parseDomainFromDiscoveredFrom(discoveredFrom));
   const dr = parseNumber(input.dr ?? input.DR);
   const da = parseNumber(input.da ?? input.DA ?? input.authorityScore ?? input["Authority Score"]);
-  const traffic = parseNumber(input.traffic ?? input.Traffic);
+  const traffic = parseNumber(input.traffic ?? input.Traffic ?? findValue(["traffic", "流量"]));
   const spamScore = parseNumber(input.spamScore ?? input.SPAM) ?? 0;
   const isBlogCommentCandidate = parseBoolish(input.isBlogCommentCandidate ?? input["博客评论"], false);
   const noRegisterLikely = parseBoolish(input.noRegisterLikely ?? input["免注册候选"], false);
@@ -334,6 +341,10 @@ function buildImportedResource(input) {
     source: input.source || "import",
     sourcePage: input.sourcePage || "",
     anchor: input.anchor || "",
+    pageScore: parseNumber(input.pageScore ?? input.ur ?? input.UR ?? findValue(["page score", "page authority", "页面权重"])),
+    linkType: input.linkType || input["Link Type"] || findValue(["link type", "follow", "链接类型"]) || "unknown",
+    firstSeen: input.firstSeen || input["First Seen"] || findValue(["first seen", "首次发现"]) || "",
+    lastSeen: input.lastSeen || input["Last Seen"] || findValue(["last seen", "最后检测"]) || "",
     dr,
     da,
     traffic,
@@ -745,17 +756,21 @@ async function generateBlogCommentDraft(payload) {
   const articleTitle = safeText(payload?.articleTitle || "");
   const articleText = safeText(payload?.articleText || "").slice(0, 4500);
   const commentSystem = safeText(payload?.commentSystem || "");
+  const siteName = safeText(payload?.siteName || config.blogSiteName || "");
+  const keyword = safeText(payload?.keyword || config.blogKeyword || "");
 
   const prompt = [
     "你是博客评论助手，目标是写一条自然、具体、不过度营销的评论。",
-    `要引用的网站 URL: ${targetUrl}`,
+    `推广网站: ${siteName || targetUrl}`,
+    keyword ? `推广网站主题: ${keyword}` : "",
     blogPageUrl ? `评论页面 URL: ${blogPageUrl}` : "",
     commentSystem ? `评论系统: ${commentSystem}` : "",
     articleTitle ? `文章标题: ${articleTitle}` : "",
     articleText ? `文章内容摘要: ${articleText}` : "",
     context ? `补充信息: ${context}` : "",
     "请只返回 JSON 对象，字段必须包含：comment。",
-    "要求：comment 60-180 字；必须针对文章观点或细节回应；语气真实；不要堆关键词；不要承诺虚假体验；可以自然提到上面的 URL。",
+    "要求：comment 60-180 字；必须针对文章观点或细节回应；语气真实；不要堆关键词；不要承诺虚假体验。",
+    "评论正文不要包含网址、Markdown 链接或强行推荐；网址将单独填写到 Website 字段。",
     "不要包含 markdown，不要包含解释。"
   ]
     .filter(Boolean)
@@ -845,7 +860,7 @@ async function captureTabScreenshot(tabId) {
   }
 }
 
-async function recordBlogPublishEvent({ tabId, targetUrl, status, comment, system, submitTried, filledCount, error }) {
+async function recordBlogPublishEvent({ tabId, targetUrl, status, comment, system, submitTried, filledCount, error, resourceId, targetSiteId, queueId }) {
   const db = await getDB();
   const tab = await chrome.tabs.get(tabId).catch(() => null);
   const screenshotDataUrl = await captureTabScreenshot(tabId);
@@ -853,6 +868,9 @@ async function recordBlogPublishEvent({ tabId, targetUrl, status, comment, syste
     id: crypto.randomUUID(),
     platform: "blog_comment",
     targetUrl: targetUrl || db.publishConfig?.blogWebsiteUrl || "",
+    resourceId: resourceId || "",
+    targetSiteId: targetSiteId || "",
+    queueId: queueId || "",
     blogPageUrl: tab?.url || "",
     status,
     comment: safeText(comment || "").slice(0, 800),
@@ -863,7 +881,8 @@ async function recordBlogPublishEvent({ tabId, targetUrl, status, comment, syste
     error: error || "",
     createdAt: new Date().toISOString()
   });
-  db.tables.publish = db.tables.publish.slice(0, 30);
+  db.tables.publish = db.tables.publish.slice(0, 1000);
+  db.tables.publish.forEach((row, index) => { if (index >= 20) delete row.screenshotDataUrl; });
   await appendLog(db, `博客评论发布记录：${status} ${tab?.url || ""}`, error ? "error" : "info");
   await setDB(db);
 }
@@ -920,6 +939,8 @@ async function generateCurrentPageBlogComment(payload) {
     targetUrl: payload?.targetUrl || "",
     blogPageUrl: inspection.pageUrl || inspection.url || "",
     extraContext: payload?.extraContext || "",
+    siteName: payload?.siteName || "",
+    keyword: payload?.keyword || "",
     articleTitle: article.title || "",
     articleText: [article.metaDescription, article.text].filter(Boolean).join("\n"),
     commentSystem: inspection.system || ""
@@ -936,6 +957,7 @@ async function prefillCurrentPageBlogComment(payload) {
       authorName: safeText(payload?.authorName || ""),
       authorEmail: safeText(payload?.authorEmail || ""),
       comment: safeText(payload?.comment || ""),
+      fallbackComment: safeText(payload?.fallbackComment || ""),
       autoSubmit: false
     }
   });
@@ -970,7 +992,7 @@ async function submitCurrentPageBlogComment(payload) {
   await recordBlogPublishEvent({
     tabId: tab.id,
     targetUrl: payload?.targetUrl || "",
-    status: "submitted_try",
+    status: best.verification || "submitted_try",
     comment: payload?.comment || "",
     system: best.system,
     submitTried: true
@@ -1005,7 +1027,11 @@ async function openAndFillBlogComment(payload) {
       authorName: safeText(payload?.authorName || db.publishConfig?.blogAuthorName || ""),
       authorEmail: safeText(payload?.authorEmail || db.publishConfig?.blogAuthorEmail || ""),
       comment,
-      autoSubmit
+      fallbackComment: safeText(payload?.fallbackComment || db.publishConfig?.blogFallbackComment || ""),
+      autoSubmit,
+      resourceId: safeText(payload?.resourceId || ""),
+      targetSiteId: safeText(payload?.targetSiteId || ""),
+      queueId: safeText(payload?.queueId || "")
     },
     createdAt: new Date().toISOString()
   };
@@ -1023,6 +1049,9 @@ async function openAndFillBlogComment(payload) {
     targetUrl,
     blogPageUrl,
     status: "opening",
+    resourceId: safeText(payload?.resourceId || ""),
+    targetSiteId: safeText(payload?.targetSiteId || ""),
+    queueId: safeText(payload?.queueId || ""),
     createdAt: new Date().toISOString()
   });
   db.tables.publish = db.tables.publish.slice(0, 1000);
@@ -1083,7 +1112,10 @@ async function trySendBlogCommentAutofill(tabId) {
         comment: latestPending.payload.comment,
         system: resp?.system,
         submitTried: resp?.submitTried,
-        filledCount: resp?.filledCount
+        filledCount: resp?.filledCount,
+        resourceId: latestPending.payload.resourceId,
+        targetSiteId: latestPending.payload.targetSiteId,
+        queueId: latestPending.payload.queueId
       });
       return;
     }
@@ -1098,7 +1130,10 @@ async function trySendBlogCommentAutofill(tabId) {
       status: "fill_failed",
       comment: latestPending.payload.comment,
       system: resp?.system,
-      error: resp?.error || "unknown"
+      error: resp?.error || "unknown",
+      resourceId: latestPending.payload.resourceId,
+      targetSiteId: latestPending.payload.targetSiteId,
+      queueId: latestPending.payload.queueId
     });
     return;
   }
@@ -1197,7 +1232,7 @@ function normalizeIncomingItem(raw, source, targetDomain) {
 
   if (!domain || domain === targetDomain) return null;
   if (domain.endsWith("ahrefs.com")) return null;
-  if (domain.endsWith("semrush.com") || domain.endsWith("sem.3ue.co")) return null;
+  if (domain.endsWith("semrush.com") || domain.endsWith("sem.3ue.co") || domain.endsWith("sem.3ue.com")) return null;
 
   const drRaw = raw?.dr ?? raw?.domainRating ?? raw?.domain_rank;
   const daRaw = raw?.da ?? raw?.domainAuthority ?? raw?.authorityScore ?? raw?.authority_score;
@@ -1211,6 +1246,10 @@ function normalizeIncomingItem(raw, source, targetDomain) {
     source,
     sourcePage: raw?.sourcePage || raw?.source || "",
     anchor: raw?.anchor || raw?.anchorText || "",
+    pageScore: parseNumber(raw?.pageScore ?? raw?.ur ?? raw?.pageAuthority),
+    linkType: raw?.linkType || raw?.type || raw?.rel || "unknown",
+    firstSeen: raw?.firstSeen || raw?.first_seen || "",
+    lastSeen: raw?.lastSeen || raw?.last_seen || "",
     dr,
     da,
     traffic: parseNumber(trafficRaw)
@@ -1269,6 +1308,10 @@ async function upsertResourcesFromPayload(payload) {
       source,
       sourcePage: base.sourcePage,
       anchor: base.anchor,
+      pageScore: base.pageScore,
+      linkType: base.linkType,
+      firstSeen: base.firstSeen,
+      lastSeen: base.lastSeen,
       dr: base.dr,
       da: base.da,
       traffic: base.traffic,
@@ -1460,7 +1503,14 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 
   if (action === "GET_PUBLISH_RECORDS") {
     getDB()
-      .then((db) => sendResponse({ ok: true, rows: (db.tables.publish || []).slice(0, 100) }))
+      .then((db) => sendResponse({ ok: true, rows: (db.tables.publish || []).slice(0, 1000) }))
+      .catch((error) => sendResponse({ ok: false, error: error.message || String(error) }));
+    return true;
+  }
+
+  if (action === "GET_LOGS") {
+    getDB()
+      .then((db) => sendResponse({ ok: true, rows: (db.tables.logs || []).slice(0, 300) }))
       .catch((error) => sendResponse({ ok: false, error: error.message || String(error) }));
     return true;
   }
@@ -1589,6 +1639,6 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     return true;
   }
 
-  sendResponse({ ok: false, error: "未知 action" });
+  if (!String(action || "").startsWith("FEATURE_")) sendResponse({ ok: false, error: "未知 action" });
   return false;
 });
